@@ -21,8 +21,7 @@
 
 #include "net_connection_private.h"
 
-typedef struct _connection_handle_s
-{
+typedef struct _connection_handle_s {
 	connection_type_changed_cb type_changed_callback;
 	connection_address_changed_cb ip_changed_callback;
 	connection_address_changed_cb proxy_changed_callback;
@@ -120,13 +119,13 @@ static void __connection_cb_type_change_cb(keynode_t *node, void *user_data)
 
 	if (_connection_is_created() != true) {
 		CONNECTION_LOG(CONNECTION_ERROR, "Application is not registered"
-				"If multi-threaded, thread integrity be broken.\n");
+				"If multi-threaded, thread integrity be broken.");
 		return;
 	}
 
 	for (list = conn_handle_list; list; list = list->next) {
 		handle = (connection_h)list->data;
-		_connectioin_callback_add(__connection_cb_type_changed_cb_idle, (gpointer)handle);
+		_connection_callback_add(__connection_cb_type_changed_cb_idle, (gpointer)handle);
 	}
 }
 
@@ -144,7 +143,7 @@ static int __connection_set_type_changed_callback(connection_h connection,
 					__connection_cb_type_change_cb, NULL);
 
 		refcount++;
-		CONNECTION_LOG(CONNECTION_INFO, "Successfully registered(%d)\n", refcount);
+		CONNECTION_LOG(CONNECTION_INFO, "Successfully registered(%d)", refcount);
 	} else {
 		if (refcount > 0 &&
 				__connection_get_type_changed_callback(local_handle) != NULL) {
@@ -152,10 +151,10 @@ static int __connection_set_type_changed_callback(connection_h connection,
 				if (vconf_ignore_key_changed(VCONFKEY_NETWORK_STATUS,
 						__connection_cb_type_change_cb) < 0) {
 					CONNECTION_LOG(CONNECTION_ERROR,
-							"Error to de-register vconf callback(%d)\n", refcount);
+							"Error to de-register vconf callback(%d)", refcount);
 				} else {
 					CONNECTION_LOG(CONNECTION_INFO,
-							"Successfully de-registered(%d)\n", refcount);
+							"Successfully de-registered(%d)", refcount);
 				}
 			}
 		}
@@ -207,13 +206,13 @@ static void __connection_cb_ip_change_cb(keynode_t *node, void *user_data)
 
 	if (_connection_is_created() != true) {
 		CONNECTION_LOG(CONNECTION_ERROR, "Application is not registered"
-				"If multi-threaded, thread integrity be broken.\n");
+				"If multi-threaded, thread integrity be broken.");
 		return;
 	}
 
 	for (list = conn_handle_list; list; list = list->next) {
 		handle = (connection_h)list->data;
-		_connectioin_callback_add(__connection_cb_ip_changed_cb_idle, (gpointer)handle);
+		_connection_callback_add(__connection_cb_ip_changed_cb_idle, (gpointer)handle);
 	}
 }
 
@@ -231,7 +230,7 @@ static int __connection_set_ip_changed_callback(connection_h connection,
 					__connection_cb_ip_change_cb, NULL);
 
 		refcount++;
-		CONNECTION_LOG(CONNECTION_INFO, "Successfully registered(%d)\n", refcount);
+		CONNECTION_LOG(CONNECTION_INFO, "Successfully registered(%d)", refcount);
 	} else {
 		if (refcount > 0 &&
 				__connection_get_ip_changed_callback(local_handle) != NULL) {
@@ -239,10 +238,10 @@ static int __connection_set_ip_changed_callback(connection_h connection,
 				if (vconf_ignore_key_changed(VCONFKEY_NETWORK_IP,
 						__connection_cb_ip_change_cb) < 0) {
 					CONNECTION_LOG(CONNECTION_ERROR,
-							"Error to de-register vconf callback(%d)\n", refcount);
+							"Error to de-register vconf callback(%d)", refcount);
 				} else {
 					CONNECTION_LOG(CONNECTION_INFO,
-							"Successfully de-registered(%d)\n", refcount);
+							"Successfully de-registered(%d)", refcount);
 				}
 			}
 		}
@@ -294,13 +293,13 @@ static void __connection_cb_proxy_change_cb(keynode_t *node, void *user_data)
 
 	if (_connection_is_created() != true) {
 		CONNECTION_LOG(CONNECTION_ERROR, "Application is not registered"
-				"If multi-threaded, thread integrity be broken.\n");
+				"If multi-threaded, thread integrity be broken.");
 		return;
 	}
 
 	for (list = conn_handle_list; list; list = list->next) {
 		handle = (connection_h)list->data;
-		_connectioin_callback_add(__connection_cb_proxy_changed_cb_idle, (gpointer)handle);
+		_connection_callback_add(__connection_cb_proxy_changed_cb_idle, (gpointer)handle);
 	}
 }
 
@@ -318,7 +317,7 @@ static int __connection_set_proxy_changed_callback(connection_h connection,
 					__connection_cb_proxy_change_cb, NULL);
 
 		refcount++;
-		CONNECTION_LOG(CONNECTION_INFO, "Successfully registered(%d)\n", refcount);
+		CONNECTION_LOG(CONNECTION_INFO, "Successfully registered(%d)", refcount);
 	} else {
 		if (refcount > 0 &&
 				__connection_get_proxy_changed_callback(local_handle) != NULL) {
@@ -326,10 +325,10 @@ static int __connection_set_proxy_changed_callback(connection_h connection,
 				if (vconf_ignore_key_changed(VCONFKEY_NETWORK_PROXY,
 						__connection_cb_proxy_change_cb) < 0) {
 					CONNECTION_LOG(CONNECTION_ERROR,
-							"Error to de-register vconf callback(%d)\n", refcount);
+							"Error to de-register vconf callback(%d)", refcount);
 				} else {
 					CONNECTION_LOG(CONNECTION_INFO,
-							"Successfully de-registered(%d)\n", refcount);
+							"Successfully de-registered(%d)", refcount);
 				}
 			}
 		}
@@ -349,19 +348,30 @@ static int __connection_get_handle_count(void)
 /* Connection Manager ********************************************************/
 EXPORT_API int connection_create(connection_h *connection)
 {
+	int rv = _connection_libnet_check_enable_feature();
+	if( rv != CONNECTION_ERROR_NONE) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Failed to check enable feature");
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
 	if (connection == NULL || __connection_check_handle_validity(*connection)) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
-	if (_connection_libnet_init() == false) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Creation failed!\n");
+	rv = _connection_libnet_init();
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	}
+	else if (rv != NET_ERR_NONE) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Failed to create connection[%d]", rv);
 		return CONNECTION_ERROR_OPERATION_FAILED;
 	}
 
 	*connection = g_try_malloc0(sizeof(connection_handle_s));
 	if (*connection != NULL)
-		CONNECTION_LOG(CONNECTION_INFO, "New Handle Created %p\n", *connection);
+		CONNECTION_LOG(CONNECTION_INFO, "New handle created[%p]", *connection);
 	else
 		return CONNECTION_ERROR_OUT_OF_MEMORY;
 
@@ -373,11 +383,11 @@ EXPORT_API int connection_create(connection_h *connection)
 EXPORT_API int connection_destroy(connection_h connection)
 {
 	if (!(__connection_check_handle_validity(connection))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
-	CONNECTION_LOG(CONNECTION_INFO, "Destroy handle: %p\n", connection);
+	CONNECTION_LOG(CONNECTION_INFO, "Destroy handle: %p", connection);
 
 	__connection_set_type_changed_callback(connection, NULL, NULL);
 	__connection_set_ip_changed_callback(connection, NULL, NULL);
@@ -401,16 +411,16 @@ EXPORT_API int connection_get_type(connection_h connection, connection_type_e* t
 	int status = 0;
 
 	if (type == NULL || !(__connection_check_handle_validity(connection))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
 	if (vconf_get_int(VCONFKEY_NETWORK_STATUS, &status)) {
-		CONNECTION_LOG(CONNECTION_ERROR, "vconf_get_int Failed = %d\n", status);
+		CONNECTION_LOG(CONNECTION_ERROR, "vconf_get_int Failed = %d", status);
 		return CONNECTION_ERROR_OPERATION_FAILED;
 	}
 
-	CONNECTION_LOG(CONNECTION_INFO, "Connected Network = %d\n", status);
+	CONNECTION_LOG(CONNECTION_INFO, "Connected Network = %d", status);
 
 	*type = __connection_convert_net_state(status);
 
@@ -421,7 +431,7 @@ EXPORT_API int connection_get_ip_address(connection_h connection,
 				connection_address_family_e address_family, char** ip_address)
 {
 	if (ip_address == NULL || !(__connection_check_handle_validity(connection))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
@@ -430,16 +440,16 @@ EXPORT_API int connection_get_ip_address(connection_h connection,
 		*ip_address = vconf_get_str(VCONFKEY_NETWORK_IP);
 		break;
 	case CONNECTION_ADDRESS_FAMILY_IPV6:
-		CONNECTION_LOG(CONNECTION_ERROR, "Not supported yet\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Not supported yet");
 		return CONNECTION_ERROR_ADDRESS_FAMILY_NOT_SUPPORTED;
 		break;
 	default:
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
 	if (*ip_address == NULL) {
-		CONNECTION_LOG(CONNECTION_ERROR, "vconf_get_str Failed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "vconf_get_str Failed");
 		return CONNECTION_ERROR_OPERATION_FAILED;
 	}
 
@@ -450,7 +460,7 @@ EXPORT_API int connection_get_proxy(connection_h connection,
 				connection_address_family_e address_family, char** proxy)
 {
 	if (proxy == NULL || !(__connection_check_handle_validity(connection))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
@@ -459,16 +469,16 @@ EXPORT_API int connection_get_proxy(connection_h connection,
 		*proxy = vconf_get_str(VCONFKEY_NETWORK_PROXY);
 		break;
 	case CONNECTION_ADDRESS_FAMILY_IPV6:
-		CONNECTION_LOG(CONNECTION_ERROR, "Not supported yet\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Not supported yet");
 		return CONNECTION_ERROR_ADDRESS_FAMILY_NOT_SUPPORTED;
 		break;
 	default:
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
 	if (*proxy == NULL) {
-		CONNECTION_LOG(CONNECTION_ERROR, "vconf_get_str Failed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "vconf_get_str Failed");
 		return CONNECTION_ERROR_OPERATION_FAILED;
 	}
 
@@ -477,53 +487,104 @@ EXPORT_API int connection_get_proxy(connection_h connection,
 
 EXPORT_API int connection_get_cellular_state(connection_h connection, connection_cellular_state_e* state)
 {
+	int rv = 0;
 	int status = 0;
 	int cellular_state = 0;
+#if defined TIZEN_DUALSIM_ENABLE
+	int sim_id = 0;
+#endif
+
+	if(!(_connection_libnet_get_is_check_enable_feature())) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Not checked enable feature yet");
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	if(!(_connection_libnet_get_enable_feature_state(FEATURE_TYPE_TELEPHONY))){
+		CONNECTION_LOG(CONNECTION_ERROR, "Not supported telephony feature");
+		return CONNECTION_ERROR_NOT_SUPPORTED;
+	}
 
 	if (state == NULL || !(__connection_check_handle_validity(connection))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
-	if (!vconf_get_int(VCONFKEY_NETWORK_CELLULAR_STATE, &status)) {
-		CONNECTION_LOG(CONNECTION_INFO, "Cellular = %d\n", status);
-		*state = __connection_convert_cellular_state(status);
-
-		if (*state == CONNECTION_CELLULAR_STATE_AVAILABLE) {
-			if (vconf_get_int(VCONFKEY_DNET_STATE, &cellular_state)) {
-				CONNECTION_LOG(CONNECTION_ERROR,
-						"vconf_get_int Failed = %d\n", cellular_state);
-				return CONNECTION_ERROR_OPERATION_FAILED;
-			}
-		}
-
-		CONNECTION_LOG(CONNECTION_INFO, "Connection state = %d\n", cellular_state);
-
-		if (cellular_state == VCONFKEY_DNET_NORMAL_CONNECTED ||
-		    cellular_state == VCONFKEY_DNET_SECURE_CONNECTED ||
-		    cellular_state == VCONFKEY_DNET_TRANSFER)
-			*state = CONNECTION_CELLULAR_STATE_CONNECTED;
-
-		return CONNECTION_ERROR_NONE;
-	} else {
-		CONNECTION_LOG(CONNECTION_ERROR, "vconf_get_int Failed = %d\n", status);
+	rv = vconf_get_int(VCONFKEY_NETWORK_CELLULAR_STATE, &status);
+	if (rv != VCONF_OK) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Failed to get cellular state");
 		return CONNECTION_ERROR_OPERATION_FAILED;
 	}
+
+	CONNECTION_LOG(CONNECTION_INFO, "Cellular: %d", status);
+	*state = __connection_convert_cellular_state(status);
+
+	if (*state == CONNECTION_CELLULAR_STATE_AVAILABLE) {
+#if defined TIZEN_DUALSIM_ENABLE
+		rv = vconf_get_int(VCONF_TELEPHONY_DEFAULT_DATA_SERVICE, &sim_id);
+		if (rv != VCONF_OK) {
+			CONNECTION_LOG(CONNECTION_ERROR,
+					"Failed to get default subscriber id", sim_id);
+			return CONNECTION_ERROR_OPERATION_FAILED;
+		}
+
+		switch (sim_id) {
+		case CONNECTION_CELLULAR_SUBSCRIBER_1:
+#endif
+			rv = vconf_get_int(VCONFKEY_DNET_STATE, &cellular_state);
+#if defined TIZEN_DUALSIM_ENABLE
+			break;
+
+		case CONNECTION_CELLULAR_SUBSCRIBER_2:
+			rv = vconf_get_int(VCONFKEY_DNET_STATE2, &cellular_state);
+			break;
+
+		default:
+			CONNECTION_LOG(CONNECTION_ERROR, "Invalid subscriber id:%d", sim_id);
+			return CONNECTION_ERROR_OPERATION_FAILED;
+		}
+#endif
+		if (rv != VCONF_OK) {
+			CONNECTION_LOG(CONNECTION_ERROR, "Failed to get cellular state");
+			return CONNECTION_ERROR_OPERATION_FAILED;
+		}
+	}
+
+	CONNECTION_LOG(CONNECTION_INFO, "Cellular state: %d", cellular_state);
+
+	if (cellular_state == VCONFKEY_DNET_NORMAL_CONNECTED ||
+			cellular_state == VCONFKEY_DNET_SECURE_CONNECTED ||
+			cellular_state == VCONFKEY_DNET_TRANSFER)
+		*state = CONNECTION_CELLULAR_STATE_CONNECTED;
+
+	return CONNECTION_ERROR_NONE;
 }
 
 EXPORT_API int connection_get_wifi_state(connection_h connection, connection_wifi_state_e* state)
 {
-	if (state == NULL || !(__connection_check_handle_validity(connection))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
-		return CONNECTION_ERROR_INVALID_PARAMETER;
-	}
+	int rv;
 
-	if (_connection_libnet_get_wifi_state(state) == false) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Fail to get wifi state\n");
+	if(!(_connection_libnet_get_is_check_enable_feature())) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Not checked enable feature yet");
 		return CONNECTION_ERROR_OPERATION_FAILED;
 	}
 
-	CONNECTION_LOG(CONNECTION_INFO, "WiFi state = %d\n", *state);
+	if(!(_connection_libnet_get_enable_feature_state(FEATURE_TYPE_WIFI))){
+		CONNECTION_LOG(CONNECTION_ERROR, "Not supported wifi feature");
+		return CONNECTION_ERROR_NOT_SUPPORTED;
+	}
+
+	if (state == NULL || !(__connection_check_handle_validity(connection))) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
+		return CONNECTION_ERROR_INVALID_PARAMETER;
+	}
+
+	rv = _connection_libnet_get_wifi_state(state);
+	if (rv != CONNECTION_ERROR_NONE) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Fail to get Wi-Fi state[%d]", rv);
+		return rv;
+	}
+
+	CONNECTION_LOG(CONNECTION_INFO, "Wi-Fi state: %d", *state);
 
 	return CONNECTION_ERROR_NONE;
 }
@@ -531,34 +592,38 @@ EXPORT_API int connection_get_wifi_state(connection_h connection, connection_wif
 EXPORT_API int connection_get_ethernet_state(connection_h connection, connection_ethernet_state_e* state)
 {
 	if (state == NULL || !(__connection_check_handle_validity(connection))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
-	if (_connection_libnet_get_ethernet_state(state) == false)
-		return CONNECTION_ERROR_OPERATION_FAILED;
-
-	return CONNECTION_ERROR_NONE;
+	return _connection_libnet_get_ethernet_state(state);
 }
 
 EXPORT_API int connection_get_bt_state(connection_h connection, connection_bt_state_e* state)
 {
+	if(!(_connection_libnet_get_is_check_enable_feature())) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Not checked enable feature yet");
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	if(!(_connection_libnet_get_enable_feature_state(FEATURE_TYPE_TETHERING_BLUETOOTH))){
+		CONNECTION_LOG(CONNECTION_ERROR, "Not supported bluetooth feature");
+		return CONNECTION_ERROR_NOT_SUPPORTED;
+	}
+
 	if (state == NULL || !(__connection_check_handle_validity(connection))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
-	if (_connection_libnet_get_bluetooth_state(state) == false)
-		return CONNECTION_ERROR_OPERATION_FAILED;
-
-	return CONNECTION_ERROR_NONE;
+	return _connection_libnet_get_bluetooth_state(state);
 }
 
 EXPORT_API int connection_set_type_changed_cb(connection_h connection,
 					connection_type_changed_cb callback, void* user_data)
 {
 	if (callback == NULL || !(__connection_check_handle_validity(connection))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
@@ -568,7 +633,7 @@ EXPORT_API int connection_set_type_changed_cb(connection_h connection,
 EXPORT_API int connection_unset_type_changed_cb(connection_h connection)
 {
 	if (!(__connection_check_handle_validity(connection))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
@@ -579,7 +644,7 @@ EXPORT_API int connection_set_ip_address_changed_cb(connection_h connection,
 				connection_address_changed_cb callback, void* user_data)
 {
 	if (callback == NULL || !(__connection_check_handle_validity(connection))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
@@ -589,7 +654,7 @@ EXPORT_API int connection_set_ip_address_changed_cb(connection_h connection,
 EXPORT_API int connection_unset_ip_address_changed_cb(connection_h connection)
 {
 	if (!(__connection_check_handle_validity(connection))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
@@ -600,7 +665,7 @@ EXPORT_API int connection_set_proxy_address_changed_cb(connection_h connection,
 				connection_address_changed_cb callback, void* user_data)
 {
 	if (callback == NULL || !(__connection_check_handle_validity(connection))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
@@ -610,7 +675,7 @@ EXPORT_API int connection_set_proxy_address_changed_cb(connection_h connection,
 EXPORT_API int connection_unset_proxy_address_changed_cb(connection_h connection)
 {
 	if (!(__connection_check_handle_validity(connection))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
@@ -619,24 +684,43 @@ EXPORT_API int connection_unset_proxy_address_changed_cb(connection_h connection
 
 EXPORT_API int connection_add_profile(connection_h connection, connection_profile_h profile)
 {
-	if (!(__connection_check_handle_validity(connection)) ||
-	    !(_connection_libnet_check_profile_validity(profile))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
-		return CONNECTION_ERROR_INVALID_PARAMETER;
-	}
-
 	int rv = 0;
-
 	net_profile_info_t *profile_info = profile;
 
-	if (profile_info->profile_type != NET_DEVICE_CELLULAR) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+	if(!(_connection_libnet_get_is_check_enable_feature())) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Not checked enable feature yet");
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	if(!(_connection_libnet_get_enable_feature_state(FEATURE_TYPE_TELEPHONY))){
+		CONNECTION_LOG(CONNECTION_ERROR, "Not supported telephony feature");
+		return CONNECTION_ERROR_NOT_SUPPORTED;
+	}
+
+	if (!(__connection_check_handle_validity(connection)) ||
+	    !(_connection_libnet_check_profile_validity(profile))) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
-	rv = net_add_profile(profile_info->ProfileInfo.Pdp.ServiceType, (net_profile_info_t*)profile);
-	if (rv != NET_ERR_NONE) {
-		CONNECTION_LOG(CONNECTION_ERROR, "net_add_profile Failed = %d\n", rv);
+	if (profile_info->profile_type != NET_DEVICE_CELLULAR) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
+		return CONNECTION_ERROR_INVALID_PARAMETER;
+	}
+
+	if (profile_info->ProfileInfo.Pdp.PSModemPath[0] != '/' ||
+			strlen(profile_info->ProfileInfo.Pdp.PSModemPath) < 2) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Modem object path is NULL");
+		return CONNECTION_ERROR_INVALID_PARAMETER;
+	}
+
+	rv = net_add_profile(profile_info->ProfileInfo.Pdp.ServiceType,
+							(net_profile_info_t*)profile);
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv != NET_ERR_NONE) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Failed to add profile[%d]", rv);
 		return CONNECTION_ERROR_OPERATION_FAILED;
 	}
 
@@ -645,24 +729,38 @@ EXPORT_API int connection_add_profile(connection_h connection, connection_profil
 
 EXPORT_API int connection_remove_profile(connection_h connection, connection_profile_h profile)
 {
-	if (!(__connection_check_handle_validity(connection)) ||
-	    !(_connection_libnet_check_profile_validity(profile))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
-		return CONNECTION_ERROR_INVALID_PARAMETER;
-	}
-
 	int rv = 0;
 	net_profile_info_t *profile_info = profile;
 
+	if(!(_connection_libnet_get_is_check_enable_feature())) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Not checked enable feature yet");
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	if(!(_connection_libnet_get_enable_feature_state(FEATURE_TYPE_TELEPHONY)) &&
+		!(_connection_libnet_get_enable_feature_state(FEATURE_TYPE_WIFI))){
+		CONNECTION_LOG(CONNECTION_ERROR, "Not supported feature");
+		return CONNECTION_ERROR_NOT_SUPPORTED;
+	}
+
+	if (!(__connection_check_handle_validity(connection)) ||
+			!(_connection_libnet_check_profile_validity(profile))) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
+		return CONNECTION_ERROR_INVALID_PARAMETER;
+	}
+
 	if (profile_info->profile_type != NET_DEVICE_CELLULAR &&
 	    profile_info->profile_type != NET_DEVICE_WIFI) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
 	rv = net_delete_profile(profile_info->ProfileName);
-	if (rv != NET_ERR_NONE) {
-		CONNECTION_LOG(CONNECTION_ERROR, "net_delete_profile Failed = %d\n", rv);
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv != NET_ERR_NONE) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Failed to delete profile[%d]", rv);
 		return CONNECTION_ERROR_OPERATION_FAILED;
 	}
 
@@ -671,18 +769,32 @@ EXPORT_API int connection_remove_profile(connection_h connection, connection_pro
 
 EXPORT_API int connection_update_profile(connection_h connection, connection_profile_h profile)
 {
-	if (!(__connection_check_handle_validity(connection)) ||
-	    !(_connection_libnet_check_profile_validity(profile))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
-		return CONNECTION_ERROR_INVALID_PARAMETER;
-	}
-
 	int rv = 0;
 	net_profile_info_t *profile_info = profile;
 
+	if(!(_connection_libnet_get_is_check_enable_feature())) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Not checked enable feature yet");
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	if(!(_connection_libnet_get_enable_feature_state(FEATURE_TYPE_TELEPHONY)) &&
+		!(_connection_libnet_get_enable_feature_state(FEATURE_TYPE_WIFI))){
+		CONNECTION_LOG(CONNECTION_ERROR, "Not supported feature");
+		return CONNECTION_ERROR_NOT_SUPPORTED;
+	}
+
+	if (!(__connection_check_handle_validity(connection)) ||
+	    !(_connection_libnet_check_profile_validity(profile))) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
+		return CONNECTION_ERROR_INVALID_PARAMETER;
+	}
+
 	rv = net_modify_profile(profile_info->ProfileName, (net_profile_info_t*)profile);
-	if (rv != NET_ERR_NONE) {
-		CONNECTION_LOG(CONNECTION_ERROR, "net_modify_profile Failed = %d\n", rv);
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv != NET_ERR_NONE) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Failed to modify profile[%d]", rv);
 		return CONNECTION_ERROR_OPERATION_FAILED;
 	}
 
@@ -694,8 +806,9 @@ EXPORT_API int connection_get_profile_iterator(connection_h connection,
 {
 	if (!(__connection_check_handle_validity(connection)) ||
 	    (type != CONNECTION_ITERATOR_TYPE_REGISTERED &&
-	     type != CONNECTION_ITERATOR_TYPE_CONNECTED)) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+	     type != CONNECTION_ITERATOR_TYPE_CONNECTED &&
+	     type != CONNECTION_ITERATOR_TYPE_DEFAULT)) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
@@ -721,18 +834,29 @@ EXPORT_API int connection_destroy_profile_iterator(connection_profile_iterator_h
 EXPORT_API int connection_get_current_profile(connection_h connection, connection_profile_h* profile)
 {
 	if (!(__connection_check_handle_validity(connection)) || profile == NULL) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
 	return _connection_libnet_get_current_profile(profile);
 }
 
-EXPORT_API int connection_get_default_cellular_service_profile(connection_h connection,
-		connection_cellular_service_type_e type, connection_profile_h* profile)
+EXPORT_API int connection_get_default_cellular_service_profile(
+		connection_h connection, connection_cellular_service_type_e type,
+		connection_profile_h *profile)
 {
+	if(!(_connection_libnet_get_is_check_enable_feature())) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Not checked enable feature yet");
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	if(!(_connection_libnet_get_enable_feature_state(FEATURE_TYPE_TELEPHONY))){
+		CONNECTION_LOG(CONNECTION_ERROR, "Not supported telephony feature");
+		return CONNECTION_ERROR_NOT_SUPPORTED;
+	}
+
 	if (!(__connection_check_handle_validity(connection)) || profile == NULL) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
@@ -742,8 +866,18 @@ EXPORT_API int connection_get_default_cellular_service_profile(connection_h conn
 EXPORT_API int connection_set_default_cellular_service_profile(connection_h connection,
 		connection_cellular_service_type_e type, connection_profile_h profile)
 {
+	if(!(_connection_libnet_get_is_check_enable_feature())) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Not checked enable feature yet");
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	if(!(_connection_libnet_get_enable_feature_state(FEATURE_TYPE_TELEPHONY))){
+		CONNECTION_LOG(CONNECTION_ERROR, "Not supported telephony feature");
+		return CONNECTION_ERROR_NOT_SUPPORTED;
+	}
+
 	if (!(__connection_check_handle_validity(connection)) || profile == NULL) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
@@ -754,9 +888,19 @@ EXPORT_API int connection_set_default_cellular_service_profile_async(connection_
 		connection_cellular_service_type_e type, connection_profile_h profile,
 		connection_set_default_cb callback, void* user_data)
 {
+	if(!(_connection_libnet_get_is_check_enable_feature())) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Not checked enable feature yet");
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	if(!(_connection_libnet_get_enable_feature_state(FEATURE_TYPE_TELEPHONY))){
+		CONNECTION_LOG(CONNECTION_ERROR, "Not supported telephony feature");
+		return CONNECTION_ERROR_NOT_SUPPORTED;
+	}
+
 	if (!(__connection_check_handle_validity(connection)) ||
 	    profile == NULL || callback == NULL) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
@@ -768,7 +912,7 @@ EXPORT_API int connection_open_profile(connection_h connection, connection_profi
 {
 	if (!(__connection_check_handle_validity(connection)) ||
 	    profile == NULL || callback == NULL) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
@@ -780,18 +924,44 @@ EXPORT_API int connection_close_profile(connection_h connection, connection_prof
 {
 	if (!(__connection_check_handle_validity(connection)) ||
 	    profile == NULL || callback == NULL) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
 	return _connection_libnet_close_profile(profile, callback, user_data);
 }
 
+EXPORT_API int connection_reset_profile(connection_h connection,
+				connection_reset_option_e type, int id, connection_reset_cb callback, void *user_data)
+{
+	if(!(_connection_libnet_get_is_check_enable_feature())) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Not checked enable feature yet");
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	if(!(_connection_libnet_get_enable_feature_state(FEATURE_TYPE_TELEPHONY))){
+		CONNECTION_LOG(CONNECTION_ERROR, "Not supported telephony feature");
+		return CONNECTION_ERROR_NOT_SUPPORTED;
+	}
+
+	if (!(__connection_check_handle_validity(connection))) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed");
+		return CONNECTION_ERROR_INVALID_PARAMETER;
+	}
+
+	if(id < 0 || id > 1) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed");
+		return CONNECTION_ERROR_INVALID_PARAMETER;
+	}
+
+	return _connection_libnet_reset_profile(type, id, callback, user_data);
+}
+
 EXPORT_API int connection_add_route(connection_h connection, const char* interface_name, const char* host_address)
 {
 	if (!(__connection_check_handle_validity(connection)) ||
 	    interface_name == NULL || host_address == NULL) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
@@ -802,85 +972,124 @@ EXPORT_API int connection_remove_route(connection_h connection, const char* inte
 {
 	if (!(__connection_check_handle_validity(connection)) ||
 	    interface_name == NULL || host_address == NULL) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
 	return _connection_libnet_remove_route(interface_name, host_address);
 }
 
-static int __get_statistic(connection_type_e connection_type,
-			connection_statistics_type_e statistics_type, long long* llsize)
+static int __get_cellular_statistic(
+		connection_statistics_type_e statistics_type, long long *llsize)
 {
-	int rv = 0;
+	int rv = VCONF_OK, rv1 = VCONF_OK;
 	int last_size = 0, size = 0;
-	unsigned long long ull_size;
-	int stat_type;
+#if defined TIZEN_DUALSIM_ENABLE
+	int sim_id = 0;
+#endif
 
 	if (llsize == NULL) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
-	if (connection_type == CONNECTION_TYPE_CELLULAR) {
+	switch (statistics_type) {
+	case CONNECTION_STATISTICS_TYPE_LAST_SENT_DATA:
+	case CONNECTION_STATISTICS_TYPE_LAST_RECEIVED_DATA:
+	case CONNECTION_STATISTICS_TYPE_TOTAL_SENT_DATA:
+	case CONNECTION_STATISTICS_TYPE_TOTAL_RECEIVED_DATA:
+		break;
+	default:
+		return CONNECTION_ERROR_INVALID_PARAMETER;
+	}
+
+#if defined TIZEN_DUALSIM_ENABLE
+	rv = vconf_get_int(VCONF_TELEPHONY_DEFAULT_DATA_SERVICE, &sim_id);
+	if (rv != VCONF_OK) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Failed to get default subscriber id");
+		*llsize = 0;
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	switch (sim_id) {
+	case 0:
+#endif
 		switch (statistics_type) {
 		case CONNECTION_STATISTICS_TYPE_LAST_SENT_DATA:
 			rv = vconf_get_int(VCONFKEY_NETWORK_CELLULAR_PKT_LAST_SNT, &last_size);
-			if (rv != 0) {
-				CONNECTION_LOG(CONNECTION_ERROR, "Cannot Get VCONFKEY_NETWORK_CELLULAR_PKT_LAST_SNT = %d\n", last_size);
-				*llsize = 0;
-				return CONNECTION_ERROR_OPERATION_FAILED;
-			}
-
 			break;
 		case CONNECTION_STATISTICS_TYPE_LAST_RECEIVED_DATA:
 			rv = vconf_get_int(VCONFKEY_NETWORK_CELLULAR_PKT_LAST_RCV, &last_size);
-			if (rv != 0) {
-				CONNECTION_LOG(CONNECTION_ERROR, "Cannot Get VCONFKEY_NETWORK_CELLULAR_PKT_LAST_RCV = %d\n", last_size);
-				*llsize = 0;
-				return CONNECTION_ERROR_OPERATION_FAILED;
-			}
-
 			break;
 		case CONNECTION_STATISTICS_TYPE_TOTAL_SENT_DATA:
 			rv = vconf_get_int(VCONFKEY_NETWORK_CELLULAR_PKT_LAST_SNT, &last_size);
-			if (rv != 0) {
-				CONNECTION_LOG(CONNECTION_ERROR, "Cannot Get VCONFKEY_NETWORK_CELLULAR_PKT_LAST_SNT = %d\n", last_size);
-				*llsize = 0;
-				return CONNECTION_ERROR_OPERATION_FAILED;
-			}
-
-			rv = vconf_get_int(VCONFKEY_NETWORK_CELLULAR_PKT_TOTAL_SNT, &size);
-			if (rv != 0) {
-				CONNECTION_LOG(CONNECTION_ERROR, "Cannot Get VCONFKEY_NETWORK_CELLULAR_PKT_TOTAL_SNT = %d\n", size);
-				*llsize = 0;
-				return CONNECTION_ERROR_OPERATION_FAILED;
-			}
-
+			rv1 = vconf_get_int(VCONFKEY_NETWORK_CELLULAR_PKT_TOTAL_SNT, &size);
 			break;
 		case CONNECTION_STATISTICS_TYPE_TOTAL_RECEIVED_DATA:
 			rv = vconf_get_int(VCONFKEY_NETWORK_CELLULAR_PKT_LAST_RCV, &last_size);
-			if (rv != 0) {
-				CONNECTION_LOG(CONNECTION_ERROR, "Cannot Get VCONFKEY_NETWORK_CELLULAR_PKT_LAST_RCV = %d\n", last_size);
-				*llsize = 0;
-				return CONNECTION_ERROR_OPERATION_FAILED;
-			}
-
-			rv = vconf_get_int(VCONFKEY_NETWORK_CELLULAR_PKT_TOTAL_RCV, &size);
-			if (rv != 0) {
-				CONNECTION_LOG(CONNECTION_ERROR, "Cannot Get VCONFKEY_NETWORK_CELLULAR_PKT_TOTAL_RCV = %d\n", size);
-				*llsize = 0;
-				return CONNECTION_ERROR_OPERATION_FAILED;
-			}
-
+			rv1 = vconf_get_int(VCONFKEY_NETWORK_CELLULAR_PKT_TOTAL_RCV, &size);
 			break;
-		default:
-			return CONNECTION_ERROR_INVALID_PARAMETER;
 		}
+#if defined TIZEN_DUALSIM_ENABLE
+		break;
+	case 1:
+		switch (statistics_type) {
+		case CONNECTION_STATISTICS_TYPE_LAST_SENT_DATA:
+			rv = vconf_get_int(VCONFKEY_NETWORK_CELLULAR_PKT_LAST_SNT2, &last_size);
+			break;
+		case CONNECTION_STATISTICS_TYPE_LAST_RECEIVED_DATA:
+			rv = vconf_get_int(VCONFKEY_NETWORK_CELLULAR_PKT_LAST_RCV2, &last_size);
+			break;
+		case CONNECTION_STATISTICS_TYPE_TOTAL_SENT_DATA:
+			rv = vconf_get_int(VCONFKEY_NETWORK_CELLULAR_PKT_LAST_SNT2, &last_size);
+			rv1 = vconf_get_int(VCONFKEY_NETWORK_CELLULAR_PKT_TOTAL_SNT2, &size);
+			break;
+		case CONNECTION_STATISTICS_TYPE_TOTAL_RECEIVED_DATA:
+			rv = vconf_get_int(VCONFKEY_NETWORK_CELLULAR_PKT_LAST_RCV2, &last_size);
+			rv1 = vconf_get_int(VCONFKEY_NETWORK_CELLULAR_PKT_TOTAL_RCV2, &size);
+			break;
+		}
+		break;
+	default:
+		*llsize = 0;
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid subscriber id:%d", sim_id);
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+#endif
 
-		*llsize = (long long)(last_size * 1000 + size * 1000);
-		CONNECTION_LOG(CONNECTION_INFO,"%lld bytes\n", *llsize);
-	} else if (connection_type == CONNECTION_TYPE_WIFI) {
+	if (rv != VCONF_OK || rv1 != VCONF_OK) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Failed to get cellular statistics");
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	*llsize = (long long)(last_size * 1000 + size * 1000);
+	CONNECTION_LOG(CONNECTION_INFO,"%lld bytes", *llsize);
+
+	return CONNECTION_ERROR_NONE;
+}
+
+static int __get_statistic(connection_type_e connection_type,
+		connection_statistics_type_e statistics_type, long long *llsize)
+{
+	int rv, stat_type;
+	unsigned long long ull_size;
+
+	if (llsize == NULL) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
+		return CONNECTION_ERROR_INVALID_PARAMETER;
+	}
+
+	rv  = _connection_libnet_check_get_privilege();
+	if (rv == CONNECTION_ERROR_PERMISSION_DENIED)
+		return rv;
+	else if (rv != CONNECTION_ERROR_NONE) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Failed to get statistics");
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	if (connection_type == CONNECTION_TYPE_CELLULAR)
+		return __get_cellular_statistic(statistics_type, llsize);
+	else if (connection_type == CONNECTION_TYPE_WIFI) {
 		switch (statistics_type) {
 		case CONNECTION_STATISTICS_TYPE_LAST_SENT_DATA:
 			stat_type = NET_STATISTICS_TYPE_LAST_SENT_DATA;
@@ -898,13 +1107,16 @@ static int __get_statistic(connection_type_e connection_type,
 			return CONNECTION_ERROR_INVALID_PARAMETER;
 		}
 
-		if (_connection_libnet_get_statistics(stat_type, &ull_size) != CONNECTION_ERROR_NONE) {
-			CONNECTION_LOG(CONNECTION_ERROR, "Cannot Get Wi-Fi statistics : %d\n", ull_size);
+		rv  = _connection_libnet_get_statistics(stat_type, &ull_size);
+		if (rv == CONNECTION_ERROR_PERMISSION_DENIED)
+			return rv;
+		else if (rv != CONNECTION_ERROR_NONE) {
+			CONNECTION_LOG(CONNECTION_ERROR, "Failed to get Wi-Fi statistics");
 			*llsize = 0;
 			return CONNECTION_ERROR_OPERATION_FAILED;
 		}
 
-		CONNECTION_LOG(CONNECTION_INFO,"%lld bytes\n", ull_size);
+		CONNECTION_LOG(CONNECTION_INFO,"%lld bytes", ull_size);
 		*llsize = (long long)ull_size;
 	} else
 		return CONNECTION_ERROR_INVALID_PARAMETER;
@@ -913,7 +1125,7 @@ static int __get_statistic(connection_type_e connection_type,
 }
 
 static int __reset_statistic(connection_type_e connection_type,
-			connection_statistics_type_e statistics_type)
+		connection_statistics_type_e statistics_type)
 {
 	int conn_type;
 	int stat_type;
@@ -947,7 +1159,7 @@ static int __reset_statistic(connection_type_e connection_type,
 	if (rv != CONNECTION_ERROR_NONE)
 		return rv;
 
-	CONNECTION_LOG(CONNECTION_INFO,"connection_reset_statistics success\n");
+	CONNECTION_LOG(CONNECTION_INFO,"connection_reset_statistics success");
 
 	return CONNECTION_ERROR_NONE;
 }
@@ -956,8 +1168,24 @@ EXPORT_API int connection_get_statistics(connection_h connection,
 				connection_type_e connection_type,
 				connection_statistics_type_e statistics_type, long long* size)
 {
+	if(!(_connection_libnet_get_is_check_enable_feature())) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Not checked enable feature yet");
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	if((connection_type == CONNECTION_TYPE_CELLULAR) &&
+		!(_connection_libnet_get_enable_feature_state(FEATURE_TYPE_TELEPHONY))) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Not supported feature");
+		return CONNECTION_ERROR_NOT_SUPPORTED;
+	}
+	else if((connection_type == CONNECTION_TYPE_WIFI) &&
+		!(_connection_libnet_get_enable_feature_state(FEATURE_TYPE_WIFI))) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Not supported feature");
+		return CONNECTION_ERROR_NOT_SUPPORTED;
+	}
+
 	if (!(__connection_check_handle_validity(connection)) || size == NULL) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
@@ -968,10 +1196,27 @@ EXPORT_API int connection_reset_statistics(connection_h connection,
 				connection_type_e connection_type,
 				connection_statistics_type_e statistics_type)
 {
+	if(!(_connection_libnet_get_is_check_enable_feature())) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Not checked enable feature yet");
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	if((connection_type == CONNECTION_TYPE_CELLULAR) &&
+		!(_connection_libnet_get_enable_feature_state(FEATURE_TYPE_TELEPHONY))) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Not supported feature");
+		return CONNECTION_ERROR_NOT_SUPPORTED;
+	}
+	else if((connection_type == CONNECTION_TYPE_WIFI) &&
+		!(_connection_libnet_get_enable_feature_state(FEATURE_TYPE_WIFI))) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Not supported feature");
+		return CONNECTION_ERROR_NOT_SUPPORTED;
+	}
+
 	if (!__connection_check_handle_validity(connection)) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
 	return __reset_statistic(connection_type, statistics_type);
 }
+

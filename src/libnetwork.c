@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <vconf/vconf.h>
+#include <system_info.h>
 
 #include "net_connection_private.h"
 
@@ -40,9 +41,11 @@ struct _libnet_s {
 	connection_opened_cb opened_cb;
 	connection_closed_cb closed_cb;
 	connection_set_default_cb set_default_cb;
+	connection_reset_cb reset_profile_cb;
 	void *opened_user_data;
 	void *closed_user_data;
 	void *set_default_user_data;
+	void *reset_profile_user_data;
 	bool is_created;
 };
 
@@ -58,9 +61,17 @@ struct managed_idle_data {
 	guint id;
 };
 
+struct feature_type {
+	bool telephony;
+	bool wifi;
+	bool tethering_bluetooth;
+};
+
 static __thread struct _profile_list_s profile_iterator = {0, 0, NULL};
 static __thread struct _libnet_s libnet = {NULL, NULL, NULL, NULL, NULL, NULL, false};
 static __thread GSList *managed_idler_list = NULL;
+static __thread bool is_check_enable_feature = false;
+static __thread struct feature_type enable_feature = {false, false, false};
 
 bool _connection_is_created(void)
 {
@@ -95,6 +106,8 @@ static connection_error_e __libnet_convert_to_cp_error_type(net_err_t err_type)
 		return CONNECTION_ERROR_OPERATION_ABORTED;
 	case NET_ERR_TIME_OUT:
 		return CONNECTION_ERROR_NO_REPLY;
+	case NET_ERR_ACCESS_DENIED:
+		return CONNECTION_ERROR_PERMISSION_DENIED;
 	default:
 		return CONNECTION_ERROR_OPERATION_FAILED;
 	}
@@ -131,6 +144,10 @@ static const char *__libnet_convert_cp_error_type_to_string(connection_error_e e
 		return "INVALID_KEY";
 	case CONNECTION_ERROR_NO_REPLY:
 		return "NO_REPLY";
+	case CONNECTION_ERROR_PERMISSION_DENIED:
+		return "PERMISSION_DENIED";
+	case CONNECTION_ERROR_NOT_SUPPORTED:
+		return "NOT_SUPPORTED";
 	}
 
 	return "UNKNOWN";
@@ -150,6 +167,39 @@ static const char *__libnet_convert_cp_state_to_string(connection_profile_state_
 	default:
 		return "UNKNOWN";
 	}
+}
+
+static void __libnet_set_reset_profile_cb(connection_opened_cb user_cb, void *user_data)
+{
+	if (user_cb != NULL) {
+		libnet.reset_profile_cb = user_cb;
+		libnet.reset_profile_user_data = user_data;
+	}
+}
+
+static gboolean __libnet_reset_profile_cb_idle(gpointer data)
+{
+	connection_error_e result = (connection_error_e)data;
+
+	if (libnet.reset_profile_cb != NULL)
+		libnet.reset_profile_cb(result, libnet.reset_profile_user_data);
+
+	libnet.reset_profile_cb = NULL;
+	libnet.reset_profile_user_data = NULL;
+
+	return FALSE;
+}
+
+static void __libnet_reset_profile_cb(connection_error_e result)
+{
+	if (_connection_is_created() != true) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Application is not registered"
+				"If multi-threaded, thread integrity be broken.");
+		return;
+	}
+
+	if (libnet.reset_profile_cb != NULL)
+		_connection_callback_add(__libnet_reset_profile_cb_idle, (gpointer)result);
 }
 
 static void __libnet_set_opened_cb(connection_opened_cb user_cb, void *user_data)
@@ -177,12 +227,12 @@ static void __libnet_opened_cb(connection_error_e result)
 {
 	if (_connection_is_created() != true) {
 		CONNECTION_LOG(CONNECTION_ERROR, "Application is not registered"
-				"If multi-threaded, thread integrity be broken.\n");
+				"If multi-threaded, thread integrity be broken.");
 		return;
 	}
 
 	if (libnet.opened_cb != NULL)
-		_connectioin_callback_add(__libnet_opened_cb_idle, (gpointer)result);
+		_connection_callback_add(__libnet_opened_cb_idle, (gpointer)result);
 }
 
 static void __libnet_set_closed_cb(connection_closed_cb user_cb, void *user_data)
@@ -210,12 +260,12 @@ static void __libnet_closed_cb(connection_error_e result)
 {
 	if (_connection_is_created() != true) {
 		CONNECTION_LOG(CONNECTION_ERROR, "Application is not registered"
-				"If multi-threaded, thread integrity be broken.\n");
+				"If multi-threaded, thread integrity be broken.");
 		return;
 	}
 
 	if (libnet.closed_cb != NULL)
-		_connectioin_callback_add(__libnet_closed_cb_idle, (gpointer)result);
+		_connection_callback_add(__libnet_closed_cb_idle, (gpointer)result);
 }
 
 static void __libnet_set_default_cb(connection_set_default_cb user_cb, void *user_data)
@@ -243,12 +293,12 @@ static void __libnet_default_cb(connection_error_e result)
 {
 	if (_connection_is_created() != true) {
 		CONNECTION_LOG(CONNECTION_ERROR, "Application is not registered"
-				"If multi-threaded, thread integrity be broken.\n");
+				"If multi-threaded, thread integrity be broken.");
 		return;
 	}
 
 	if (libnet.set_default_cb != NULL)
-		_connectioin_callback_add(__libnet_default_cb_idle, (gpointer)result);
+		_connection_callback_add(__libnet_default_cb_idle, (gpointer)result);
 }
 
 static gboolean __libnet_state_changed_cb_idle(gpointer data)
@@ -274,7 +324,7 @@ static void __libnet_state_changed_cb(char *profile_name, connection_profile_sta
 
 	if (_connection_is_created() != true) {
 		CONNECTION_LOG(CONNECTION_ERROR, "Application is not registered"
-				"If multi-threaded, thread integrity be broken.\n");
+				"If multi-threaded, thread integrity be broken.");
 		return;
 	}
 
@@ -301,7 +351,7 @@ static void __libnet_state_changed_cb(char *profile_name, connection_profile_sta
 	notify->state = state;
 	notify->user_data = cb_info->user_data;
 
-	id = _connectioin_callback_add(__libnet_state_changed_cb_idle,
+	id = _connection_callback_add(__libnet_state_changed_cb_idle,
 			(gpointer)notify);
 	if (!id)
 		g_free(notify);
@@ -328,7 +378,7 @@ static void __libnet_evt_cb(net_event_info_t *event_cb, void *user_data)
 		/* fall through */
 	case NET_EVENT_OPEN_IND:
 		result = __libnet_convert_to_cp_error_type(event_cb->Error);
-		CONNECTION_LOG(CONNECTION_INFO, "Got connection open %s : %s\n",
+		CONNECTION_LOG(CONNECTION_INFO, "Connection opened %s[%s]",
 					(is_requested) ? "RSP":"IND",
 					__libnet_convert_cp_error_type_to_string(result));
 
@@ -338,12 +388,12 @@ static void __libnet_evt_cb(net_event_info_t *event_cb, void *user_data)
 		switch (event_cb->Error) {
 		case NET_ERR_NONE:
 		case NET_ERR_ACTIVE_CONNECTION_EXISTS:
-			CONNECTION_LOG(CONNECTION_INFO, "'Open connection' succeeded\n");
+			CONNECTION_LOG(CONNECTION_INFO, "Successfully open connection");
 
 			__libnet_state_changed_cb(event_cb->ProfileName, CONNECTION_PROFILE_STATE_CONNECTED);
 			return;
 		default:
-			CONNECTION_LOG(CONNECTION_ERROR, "'Open connection' failed!! [%s]\n",
+			CONNECTION_LOG(CONNECTION_ERROR, "Failed to open connection[%s]",
 						__libnet_convert_cp_error_type_to_string(result));
 		}
 
@@ -355,7 +405,7 @@ static void __libnet_evt_cb(net_event_info_t *event_cb, void *user_data)
 		/* fall through */
 	case NET_EVENT_CLOSE_IND:
 		result = __libnet_convert_to_cp_error_type(event_cb->Error);
-		CONNECTION_LOG(CONNECTION_INFO, "Got connection close %s : %s\n",
+		CONNECTION_LOG(CONNECTION_INFO, "Connection closed %s[%s]",
 					(is_requested) ? "RSP":"IND",
 					__libnet_convert_cp_error_type_to_string(result));
 
@@ -364,18 +414,18 @@ static void __libnet_evt_cb(net_event_info_t *event_cb, void *user_data)
 
 		switch (event_cb->Error) {
 		case NET_ERR_NONE:
-			CONNECTION_LOG(CONNECTION_INFO, "'Close connection' succeeded!\n");
+			CONNECTION_LOG(CONNECTION_INFO, "Successfully closed connection");
 
 			__libnet_state_changed_cb(event_cb->ProfileName, CONNECTION_PROFILE_STATE_DISCONNECTED);
 			return;
 		default:
-			CONNECTION_LOG(CONNECTION_ERROR, "'Close connection' failed!! [%s]\n",
-						__libnet_convert_cp_error_type_to_string(result));
+			CONNECTION_LOG(CONNECTION_ERROR, "Failed to close connection[%s]",
+							__libnet_convert_cp_error_type_to_string(result));
 		}
 
 		break;
 	case NET_EVENT_NET_STATE_IND:
-		CONNECTION_LOG(CONNECTION_INFO, "Got State changed IND\n");
+		CONNECTION_LOG(CONNECTION_INFO, "State changed IND");
 
 		if (event_cb->Datalength != sizeof(net_state_type_t))
 			return;
@@ -383,17 +433,22 @@ static void __libnet_evt_cb(net_event_info_t *event_cb, void *user_data)
 		net_state_type_t *profile_state = (net_state_type_t *)event_cb->Data;
 		connection_profile_state_e cp_state = _profile_convert_to_cp_state(*profile_state);
 
-		CONNECTION_LOG(CONNECTION_INFO, "state : %s\n", __libnet_convert_cp_state_to_string(cp_state));
-		SECURE_CONNECTION_LOG(CONNECTION_INFO, "profile name : %s\n", event_cb->ProfileName);
+		CONNECTION_LOG(CONNECTION_INFO, "state: %s", __libnet_convert_cp_state_to_string(cp_state));
+		SECURE_CONNECTION_LOG(CONNECTION_INFO, "profile name: %s", event_cb->ProfileName);
 
 		__libnet_state_changed_cb(event_cb->ProfileName, cp_state);
 
 		break;
 	case NET_EVENT_CELLULAR_SET_DEFAULT_RSP:
 		result = __libnet_convert_to_cp_error_type(event_cb->Error);
-		CONNECTION_LOG(CONNECTION_INFO, "Got set default profile RSP %d\n", result);
+		CONNECTION_LOG(CONNECTION_INFO, "Got set default profile RSP %d", result);
 		__libnet_default_cb(result);
 		break;
+
+	case NET_EVENT_CELLULAR_RESET_DEFAULT_RSP:
+		result = __libnet_convert_to_cp_error_type(event_cb->Error);
+		CONNECTION_LOG(CONNECTION_INFO, "Got reset default profile RSP %d", result);
+		__libnet_reset_profile_cb(result);
 	default :
 		break;
 	}
@@ -426,14 +481,39 @@ void __libnet_copy_connected_profile(net_profile_info_t **dest, struct _profile_
 	}
 }
 
-bool _connection_libnet_init(void)
+int __libnet_get_default_count(struct _profile_list_s *profile_list)
+{
+	int count = 0;
+	int i = 0;
+
+	for (;i < profile_list->count;i++) {
+		if (profile_list->profiles[i].ProfileInfo.Pdp.DefaultConn == TRUE)
+			count++;
+	}
+
+	return count;
+}
+
+void __libnet_copy_default_profile(net_profile_info_t **dest, struct _profile_list_s *source)
+{
+	int i = 0;
+
+	for (;i < source->count;i++) {
+		if (source->profiles[i].ProfileInfo.Pdp.DefaultConn == TRUE) {
+			memcpy(*dest, &source->profiles[i], sizeof(net_profile_info_t));
+			(*dest)++;
+		}
+	}
+}
+
+int _connection_libnet_init(void)
 {
 	int rv;
 
 	if (_connection_is_created() != true) {
 		rv = net_register_client_ext((net_event_cb_t)__libnet_evt_cb, NET_DEVICE_DEFAULT, NULL);
 		if (rv != NET_ERR_NONE)
-			return false;
+			return rv;
 
 		__connection_set_created(true);
 
@@ -441,7 +521,7 @@ bool _connection_libnet_init(void)
 			profile_cb_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	}
 
-	return true;
+	return NET_ERR_NONE;
 }
 
 bool _connection_libnet_deinit(void)
@@ -473,6 +553,9 @@ bool _connection_libnet_check_profile_validity(connection_profile_h profile)
 	GSList *list;
 	int i = 0;
 
+	if (profile == NULL)
+		return false;
+
 	for (list = prof_handle_list; list; list = list->next)
 		if (profile == list->data) return true;
 
@@ -498,14 +581,19 @@ bool _connection_libnet_check_profile_cb_validity(connection_profile_h profile)
 }
 
 
-bool _connection_libnet_get_wifi_state(connection_wifi_state_e *state)
+int _connection_libnet_get_wifi_state(connection_wifi_state_e *state)
 {
+	int rv;
 	net_wifi_state_t wlan_state;
 	net_profile_name_t profile_name;
 
-	if (net_get_wifi_state(&wlan_state, &profile_name) != NET_ERR_NONE) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Error!! net_get_wifi_state() failed.\n");
-		return false;
+	rv = net_get_wifi_state(&wlan_state, &profile_name);
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv != NET_ERR_NONE) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Failed to get Wi-Fi state[%d]", rv);
+		return CONNECTION_ERROR_OPERATION_FAILED;
 	}
 
 	switch (wlan_state) {
@@ -513,7 +601,8 @@ bool _connection_libnet_get_wifi_state(connection_wifi_state_e *state)
 		*state = CONNECTION_WIFI_STATE_DEACTIVATED;
 		break;
 	case WIFI_ON:
-	case WIFI_CONNECTING:
+	case WIFI_ASSOCIATION:
+	case WIFI_CONFIGURATION:
 		*state = CONNECTION_WIFI_STATE_DISCONNECTED;
 		break;
 	case WIFI_CONNECTED:
@@ -521,21 +610,26 @@ bool _connection_libnet_get_wifi_state(connection_wifi_state_e *state)
 		*state = CONNECTION_WIFI_STATE_CONNECTED;
 		break;
 	default :
-		CONNECTION_LOG(CONNECTION_ERROR, "Error!! Unknown state\n");
-		return false;
+		CONNECTION_LOG(CONNECTION_ERROR, "Unknown Wi-Fi state");
+		return CONNECTION_ERROR_INVALID_OPERATION;
 	}
 
-	return true;
+	return CONNECTION_ERROR_NONE;
 }
 
-bool _connection_libnet_get_ethernet_state(connection_ethernet_state_e* state)
+int _connection_libnet_get_ethernet_state(connection_ethernet_state_e* state)
 {
+	int rv;
 	struct _profile_list_s ethernet_profiles = {0, 0, NULL};
-	net_get_profile_list(NET_DEVICE_ETHERNET, &ethernet_profiles.profiles, &ethernet_profiles.count);
+	rv = net_get_profile_list(NET_DEVICE_ETHERNET, &ethernet_profiles.profiles, &ethernet_profiles.count);
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	}
 
 	if (ethernet_profiles.count == 0) {
 		*state = CONNECTION_ETHERNET_STATE_DEACTIVATED;
-		return true;
+		return CONNECTION_ERROR_NONE;
 	}
 
 	switch (ethernet_profiles.profiles->ProfileState) {
@@ -551,23 +645,29 @@ bool _connection_libnet_get_ethernet_state(connection_ethernet_state_e* state)
 		*state = CONNECTION_ETHERNET_STATE_DISCONNECTED;
 		break;
 	default:
-		return false;
+		__libnet_clear_profile_list(&ethernet_profiles);
+		return CONNECTION_ERROR_OPERATION_FAILED;
 	}
 
 	__libnet_clear_profile_list(&ethernet_profiles);
 
-	return true;
+	return CONNECTION_ERROR_NONE;
 }
 
-bool _connection_libnet_get_bluetooth_state(connection_bt_state_e* state)
+int _connection_libnet_get_bluetooth_state(connection_bt_state_e* state)
 {
 	int i = 0;
+	int rv = 0;
 	struct _profile_list_s bluetooth_profiles = {0, 0, NULL};
-	net_get_profile_list(NET_DEVICE_BLUETOOTH, &bluetooth_profiles.profiles, &bluetooth_profiles.count);
+	rv = net_get_profile_list(NET_DEVICE_BLUETOOTH, &bluetooth_profiles.profiles, &bluetooth_profiles.count);
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	}
 
 	if (bluetooth_profiles.count == 0) {
 		*state = CONNECTION_BT_STATE_DEACTIVATED;
-		return true;
+		return CONNECTION_ERROR_NONE;
 	}
 
 	for (; i < bluetooth_profiles.count; i++) {
@@ -585,14 +685,14 @@ bool _connection_libnet_get_bluetooth_state(connection_bt_state_e* state)
 			break;
 		default:
 			__libnet_clear_profile_list(&bluetooth_profiles);
-			return false;
+			return CONNECTION_ERROR_OPERATION_FAILED;
 		}
 	}
 
 done:
 	__libnet_clear_profile_list(&bluetooth_profiles);
 
-	return true;
+	return CONNECTION_ERROR_NONE;
 }
 
 int _connection_libnet_get_profile_iterator(connection_iterator_type_e type, connection_profile_iterator_h* profile_iter_h)
@@ -609,41 +709,59 @@ int _connection_libnet_get_profile_iterator(connection_iterator_type_e type, con
 	__libnet_clear_profile_list(&profile_iterator);
 
 	rv1 = net_get_profile_list(NET_DEVICE_WIFI, &wifi_profiles.profiles, &wifi_profiles.count);
-	if (rv1 != NET_ERR_NO_SERVICE && rv1 != NET_ERR_NONE)
+	if (rv1 == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv1 != NET_ERR_NO_SERVICE && rv1 != NET_ERR_NONE)
 		return CONNECTION_ERROR_OPERATION_FAILED;
 
-	CONNECTION_LOG(CONNECTION_INFO, "Wifi profile count : %d\n", wifi_profiles.count);
+	CONNECTION_LOG(CONNECTION_INFO, "Wi-Fi profile count: %d", wifi_profiles.count);
 
 	rv2 = net_get_profile_list(NET_DEVICE_CELLULAR, &cellular_profiles.profiles, &cellular_profiles.count);
-	if (rv2 != NET_ERR_NO_SERVICE && rv2 != NET_ERR_NONE) {
+	if (rv2 == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		__libnet_clear_profile_list(&wifi_profiles);
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv2 != NET_ERR_NO_SERVICE && rv2 != NET_ERR_NONE) {
 		__libnet_clear_profile_list(&wifi_profiles);
 		return CONNECTION_ERROR_OPERATION_FAILED;
 	}
-	CONNECTION_LOG(CONNECTION_INFO, "Cellular profile count : %d\n", cellular_profiles.count);
+	CONNECTION_LOG(CONNECTION_INFO, "Cellular profile count: %d", cellular_profiles.count);
 
 	rv3 = net_get_profile_list(NET_DEVICE_ETHERNET, &ethernet_profiles.profiles, &ethernet_profiles.count);
-	if (rv3 != NET_ERR_NO_SERVICE && rv3 != NET_ERR_NONE) {
+	if (rv3 == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		__libnet_clear_profile_list(&wifi_profiles);
+		__libnet_clear_profile_list(&cellular_profiles);
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv3 != NET_ERR_NO_SERVICE && rv3 != NET_ERR_NONE) {
 		__libnet_clear_profile_list(&wifi_profiles);
 		__libnet_clear_profile_list(&cellular_profiles);
 		return CONNECTION_ERROR_OPERATION_FAILED;
 	}
-	CONNECTION_LOG(CONNECTION_INFO, "Ethernet profile count : %d\n", ethernet_profiles.count);
+	CONNECTION_LOG(CONNECTION_INFO, "Ethernet profile count : %d", ethernet_profiles.count);
 
 	rv4 = net_get_profile_list(NET_DEVICE_BLUETOOTH, &bluetooth_profiles.profiles, &bluetooth_profiles.count);
-	if (rv4 != NET_ERR_NO_SERVICE && rv4 != NET_ERR_NONE) {
+	if (rv4 == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		__libnet_clear_profile_list(&wifi_profiles);
+		__libnet_clear_profile_list(&cellular_profiles);
+		__libnet_clear_profile_list(&ethernet_profiles);
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv4 != NET_ERR_NO_SERVICE && rv4 != NET_ERR_NONE) {
 		__libnet_clear_profile_list(&wifi_profiles);
 		__libnet_clear_profile_list(&cellular_profiles);
 		__libnet_clear_profile_list(&ethernet_profiles);
 		return CONNECTION_ERROR_OPERATION_FAILED;
 	}
-	CONNECTION_LOG(CONNECTION_INFO, "Bluetooth profile count : %d\n", bluetooth_profiles.count);
+	CONNECTION_LOG(CONNECTION_INFO, "Bluetooth profile count : %d", bluetooth_profiles.count);
 
 	*profile_iter_h = &profile_iterator;
 
 	switch (type) {
 	case CONNECTION_ITERATOR_TYPE_REGISTERED:
 		count = wifi_profiles.count + cellular_profiles.count + ethernet_profiles.count + bluetooth_profiles.count;
-		CONNECTION_LOG(CONNECTION_INFO, "Total profile count : %d\n", count);
+		CONNECTION_LOG(CONNECTION_INFO, "Total profile count : %d", count);
 		if (count == 0)
 			return CONNECTION_ERROR_NONE;
 
@@ -686,7 +804,7 @@ int _connection_libnet_get_profile_iterator(connection_iterator_type_e type, con
 		count += __libnet_get_connected_count(&cellular_profiles);
 		count += __libnet_get_connected_count(&ethernet_profiles);
 		count += __libnet_get_connected_count(&bluetooth_profiles);
-		CONNECTION_LOG(CONNECTION_INFO, "Total connected profile count : %d\n", count);
+		CONNECTION_LOG(CONNECTION_INFO, "Total connected profile count : %d", count);
 		if (count == 0)
 			return CONNECTION_ERROR_NONE;
 
@@ -713,6 +831,26 @@ int _connection_libnet_get_profile_iterator(connection_iterator_type_e type, con
 		if (bluetooth_profiles.count > 0)
 			__libnet_copy_connected_profile(&profiles, &bluetooth_profiles);
 
+		break;
+	case CONNECTION_ITERATOR_TYPE_DEFAULT:
+		count = __libnet_get_default_count(&cellular_profiles);
+		CONNECTION_LOG(CONNECTION_INFO, "Total default profile count : %d", count);
+		if (count == 0)
+			return CONNECTION_ERROR_NONE;
+
+		profiles = g_try_new0(net_profile_info_t, count);
+		if (profiles == NULL) {
+			__libnet_clear_profile_list(&wifi_profiles);
+			__libnet_clear_profile_list(&cellular_profiles);
+			__libnet_clear_profile_list(&ethernet_profiles);
+			__libnet_clear_profile_list(&bluetooth_profiles);
+			return CONNECTION_ERROR_OUT_OF_MEMORY;
+		}
+
+		profile_iterator.profiles = profiles;
+
+		if (cellular_profiles.count > 0)
+			__libnet_copy_default_profile(&profiles, &cellular_profiles);
 		break;
 	}
 
@@ -769,7 +907,10 @@ int _connection_libnet_get_current_profile(connection_profile_h *profile)
 	rv = net_get_active_net_info(&active_profile);
 	if (rv == NET_ERR_NO_SERVICE)
 		return CONNECTION_ERROR_NO_CONNECTION;
-	else if (rv != NET_ERR_NONE)
+	else if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv != NET_ERR_NONE)
 		return CONNECTION_ERROR_OPERATION_FAILED;
 
 	*profile = g_try_malloc0(sizeof(net_profile_info_t));
@@ -782,16 +923,42 @@ int _connection_libnet_get_current_profile(connection_profile_h *profile)
 	return CONNECTION_ERROR_NONE;
 }
 
-int _connection_libnet_open_profile(connection_profile_h profile, connection_opened_cb callback, void* user_data)
+int _connection_libnet_reset_profile(connection_reset_option_e type,
+		connection_cellular_subscriber_id_e id, connection_reset_cb callback, void *user_data)
 {
+	int rv;
+
+	rv = net_reset_profile(type, id);
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv != NET_ERR_NONE) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Failed to add profile[%d]", rv);
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	__libnet_set_reset_profile_cb(callback, user_data);
+
+	return CONNECTION_ERROR_NONE;
+}
+
+int _connection_libnet_open_profile(connection_profile_h profile,
+		connection_opened_cb callback, void* user_data)
+{
+	int rv;
+
 	if (!(_connection_libnet_check_profile_validity(profile))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
 	net_profile_info_t *profile_info = profile;
 
-	if (net_open_connection_with_profile(profile_info->ProfileName) != NET_ERR_NONE)
+	rv = net_open_connection_with_profile(profile_info->ProfileName);
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv != NET_ERR_NONE)
 		return CONNECTION_ERROR_OPERATION_FAILED;
 
 	__libnet_set_opened_cb(callback, user_data);
@@ -799,29 +966,59 @@ int _connection_libnet_open_profile(connection_profile_h profile, connection_ope
 	return CONNECTION_ERROR_NONE;
 }
 
-int _connection_libnet_get_cellular_service_profile(connection_cellular_service_type_e type, connection_profile_h *profile)
+int _connection_libnet_get_cellular_service_profile(
+		connection_cellular_service_type_e type, connection_profile_h *profile)
 {
-	int i = 0;
-	int j = 0;
+	int i = 0, j = 0;
 	int rv = NET_ERR_NONE;
+#if defined TIZEN_DUALSIM_ENABLE
+	int default_subscriber_id = 0;
+	char subscriber_id[3];
+#endif
+
+	struct _profile_list_s cellular_profiles = { 0, 0, NULL };
 	net_service_type_t service_type = _connection_profile_convert_to_libnet_cellular_service_type(type);
 
-	struct _profile_list_s cellular_profiles = {0, 0, NULL};
-
 	rv = net_get_profile_list(NET_DEVICE_CELLULAR, &cellular_profiles.profiles, &cellular_profiles.count);
-	if (rv != NET_ERR_NONE)
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv != NET_ERR_NONE) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Failed to get profile list (%d)", rv);
 		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
 
-	for (;i < cellular_profiles.count;i++)
+#if defined TIZEN_DUALSIM_ENABLE
+	if (vconf_get_int(VCONF_TELEPHONY_DEFAULT_DATA_SERVICE,
+						&default_subscriber_id) != 0) {
+		CONNECTION_LOG(CONNECTION_ERROR,
+						"Failed to get VCONF_TELEPHONY_DEFAULT_DATA_SERVICE");
+		__libnet_clear_profile_list(&cellular_profiles);
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	g_snprintf(subscriber_id, sizeof(subscriber_id), "%d", default_subscriber_id);
+#endif
+
+	for (i = 0; i < cellular_profiles.count; i++)
 		if (cellular_profiles.profiles[i].ProfileInfo.Pdp.ServiceType == service_type)
-			break;
+#if defined TIZEN_DUALSIM_ENABLE
+			if (g_str_has_suffix(
+					cellular_profiles.profiles[i].ProfileInfo.Pdp.PSModemPath,
+					subscriber_id) == TRUE)
+#endif
+				break;
 
-	if (i >= cellular_profiles.count)
+	if (i >= cellular_profiles.count) {
+		__libnet_clear_profile_list(&cellular_profiles);
 		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
 
 	*profile = g_try_malloc0(sizeof(net_profile_info_t));
-	if (*profile == NULL)
+	if (*profile == NULL) {
+		__libnet_clear_profile_list(&cellular_profiles);
 		return CONNECTION_ERROR_OUT_OF_MEMORY;
+	}
 
 	memcpy(*profile, &cellular_profiles.profiles[i], sizeof(net_profile_info_t));
 
@@ -832,7 +1029,7 @@ int _connection_libnet_get_cellular_service_profile(connection_cellular_service_
 	    type != CONNECTION_CELLULAR_SERVICE_TYPE_PREPAID_INTERNET)
 		goto done;
 
-	for (;j < cellular_profiles.count;j++) {
+	for (j = 0; j < cellular_profiles.count; j++) {
 		if (i == j)
 			continue;
 
@@ -846,6 +1043,7 @@ int _connection_libnet_get_cellular_service_profile(connection_cellular_service_
 	}
 
 done:
+	__libnet_clear_profile_list(&cellular_profiles);
 	prof_handle_list = g_slist_append(prof_handle_list, *profile);
 
 	return CONNECTION_ERROR_NONE;
@@ -853,8 +1051,10 @@ done:
 
 int _connection_libnet_set_cellular_service_profile_sync(connection_cellular_service_type_e type, connection_profile_h profile)
 {
+	int rv;
+
 	if (!(_connection_libnet_check_profile_validity(profile))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
@@ -866,7 +1066,11 @@ int _connection_libnet_set_cellular_service_profile_sync(connection_cellular_ser
 	if (service_type != type)
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 
-	if (net_set_default_cellular_service_profile(profile_info->ProfileName) != NET_ERR_NONE)
+	rv = net_set_default_cellular_service_profile(profile_info->ProfileName);
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv != NET_ERR_NONE)
 		return CONNECTION_ERROR_OPERATION_FAILED;
 
 	return CONNECTION_ERROR_NONE;
@@ -875,8 +1079,10 @@ int _connection_libnet_set_cellular_service_profile_sync(connection_cellular_ser
 int _connection_libnet_set_cellular_service_profile_async(connection_cellular_service_type_e type,
 			connection_profile_h profile, connection_set_default_cb callback, void* user_data)
 {
+	int rv;
+
 	if (!(_connection_libnet_check_profile_validity(profile))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
@@ -888,7 +1094,11 @@ int _connection_libnet_set_cellular_service_profile_async(connection_cellular_se
 	if (service_type != type)
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 
-	if (net_set_default_cellular_service_profile_async(profile_info->ProfileName) != NET_ERR_NONE)
+	rv = net_set_default_cellular_service_profile_async(profile_info->ProfileName);
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv != NET_ERR_NONE)
 		return CONNECTION_ERROR_OPERATION_FAILED;
 
 	__libnet_set_default_cb(callback, user_data);
@@ -898,14 +1108,20 @@ int _connection_libnet_set_cellular_service_profile_async(connection_cellular_se
 
 int _connection_libnet_close_profile(connection_profile_h profile, connection_closed_cb callback, void *user_data)
 {
+	int rv;
+
 	if (!(_connection_libnet_check_profile_validity(profile))) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Wrong Parameter Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
 	net_profile_info_t *profile_info = profile;
 
-	if (net_close_connection(profile_info->ProfileName) != NET_ERR_NONE)
+	rv = net_close_connection(profile_info->ProfileName);
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv != NET_ERR_NONE)
 		return CONNECTION_ERROR_OPERATION_FAILED;
 
 	__libnet_set_closed_cb(callback, user_data);
@@ -915,6 +1131,7 @@ int _connection_libnet_close_profile(connection_profile_h profile, connection_cl
 
 int _connection_libnet_add_route(const char *interface_name, const char *host_address)
 {
+	int rv;
 	char *endstr = strrchr(host_address, '.');
 
 	if (endstr == NULL ||
@@ -922,11 +1139,15 @@ int _connection_libnet_add_route(const char *interface_name, const char *host_ad
 	    strncmp(host_address, "0.", 2) == 0 ||
 	    strstr(host_address, ".0.") != NULL ||
 	    strstr(host_address, "255") != NULL) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Invalid IP address Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid IP address Passed");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
-	if (net_add_route(host_address, interface_name) != NET_ERR_NONE)
+	rv = net_add_route(host_address, interface_name);
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv != NET_ERR_NONE)
 		return CONNECTION_ERROR_OPERATION_FAILED;
 
 	return CONNECTION_ERROR_NONE;
@@ -934,6 +1155,7 @@ int _connection_libnet_add_route(const char *interface_name, const char *host_ad
 
 int _connection_libnet_remove_route(const char *interface_name, const char *host_address)
 {
+	int rv;
 	char *endstr = strrchr(host_address, '.');
 
 	if (endstr == NULL ||
@@ -941,11 +1163,15 @@ int _connection_libnet_remove_route(const char *interface_name, const char *host
 	    strncmp(host_address, "0.", 2) == 0 ||
 	    strstr(host_address, ".0.") != NULL ||
 	    strstr(host_address, "255") != NULL) {
-		CONNECTION_LOG(CONNECTION_ERROR, "Invalid IP address Passed\n");
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid IP address Passed");
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
-	if (net_remove_route(host_address, interface_name) != NET_ERR_NONE)
+	rv = net_remove_route(host_address, interface_name);
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv != NET_ERR_NONE)
 		return CONNECTION_ERROR_OPERATION_FAILED;
 
 	return CONNECTION_ERROR_NONE;
@@ -994,7 +1220,12 @@ bool _connection_libnet_remove_from_profile_cb_list(connection_profile_h profile
 
 int _connection_libnet_set_statistics(net_device_t device_type, net_statistics_type_e statistics_type)
 {
-	if (net_set_statistics(device_type, statistics_type) != NET_ERR_NONE)
+	int rv;
+	rv = net_set_statistics(device_type, statistics_type);
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv != NET_ERR_NONE)
 		return CONNECTION_ERROR_OPERATION_FAILED;
 
 	return CONNECTION_ERROR_NONE;
@@ -1002,8 +1233,36 @@ int _connection_libnet_set_statistics(net_device_t device_type, net_statistics_t
 
 int _connection_libnet_get_statistics(net_statistics_type_e statistics_type, unsigned long long *size)
 {
-	if (net_get_statistics(NET_DEVICE_WIFI, statistics_type, size) != NET_ERR_NONE)
+	int rv;
+	rv = net_get_statistics(NET_DEVICE_WIFI, statistics_type, size);
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	}else if (rv != NET_ERR_NONE)
 		return CONNECTION_ERROR_OPERATION_FAILED;
+
+	return CONNECTION_ERROR_NONE;
+}
+
+int _connection_libnet_set_cellular_subscriber_id(connection_profile_h profile,
+		connection_cellular_subscriber_id_e sim_id)
+{
+	char *modem_path = NULL;
+	net_profile_info_t *profile_info = (net_profile_info_t *)profile;
+
+	if (net_get_cellular_modem_object_path(&modem_path, sim_id) != NET_ERR_NONE) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Failed to get subscriber[%d]", sim_id);
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	if (!modem_path) {
+		CONNECTION_LOG(CONNECTION_ERROR, "NULL modem object path");
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	g_strlcpy(profile_info->ProfileInfo.Pdp.PSModemPath, modem_path,
+				NET_PROFILE_NAME_LEN_MAX);
+	g_free(modem_path);
 
 	return CONNECTION_ERROR_NONE;
 }
@@ -1027,7 +1286,7 @@ static gboolean __connection_idle_cb(gpointer user_data)
 	return data->func(data->user_data);
 }
 
-guint _connectioin_callback_add(GSourceFunc func, gpointer user_data)
+guint _connection_callback_add(GSourceFunc func, gpointer user_data)
 {
 	guint id;
 	struct managed_idle_data *data;
@@ -1076,4 +1335,87 @@ void _connection_callback_cleanup(void)
 
 	g_slist_free(managed_idler_list);
 	managed_idler_list = NULL;
+}
+
+int _connection_libnet_check_get_privilege()
+{
+	int rv;
+
+	rv = net_check_get_privilege();
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv != NET_ERR_NONE)
+		return CONNECTION_ERROR_OPERATION_FAILED;
+
+	return CONNECTION_ERROR_NONE;
+}
+
+int _connection_libnet_check_profile_privilege()
+{
+	int rv;
+
+	rv = net_check_profile_privilege();
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv != NET_ERR_NONE)
+		return CONNECTION_ERROR_OPERATION_FAILED;
+
+	return CONNECTION_ERROR_NONE;
+}
+
+bool _connection_libnet_get_is_check_enable_feature()
+{
+	return is_check_enable_feature;
+}
+
+bool _connection_libnet_get_enable_feature_state(enable_feature_type_e feature_type)
+{
+	if(is_check_enable_feature){
+		switch(feature_type) {
+		case FEATURE_TYPE_TELEPHONY:
+			return enable_feature.telephony;
+		case FEATURE_TYPE_WIFI:
+			return enable_feature.wifi;
+		case FEATURE_TYPE_TETHERING_BLUETOOTH:
+			return enable_feature.tethering_bluetooth;
+		default:
+			CONNECTION_LOG(CONNECTION_ERROR, "Invalid feature type");
+			return false;
+		}
+	}
+	CONNECTION_LOG(CONNECTION_ERROR, "Not checked enable feature yet");
+	return false;
+}
+
+int _connection_libnet_check_enable_feature()
+{
+	int rv;
+
+	if(!is_check_enable_feature){
+		rv = system_info_get_platform_bool("tizen.org/feature/network.telephony", &enable_feature.telephony);
+		if(rv < 0) {
+			CONNECTION_LOG(CONNECTION_ERROR, "Failed to get system info for telephony feature");
+			return CONNECTION_ERROR_OPERATION_FAILED;
+		}
+
+		rv = system_info_get_platform_bool("tizen.org/feature/network.wifi", &enable_feature.wifi);
+		if(rv < 0) {
+			CONNECTION_LOG(CONNECTION_ERROR, "Failed to get system info for wifi feature");
+			return CONNECTION_ERROR_OPERATION_FAILED;
+		}
+
+		rv = system_info_get_platform_bool("tizen.org/feature/network.tethering.bluetooth", &enable_feature.tethering_bluetooth);
+		if(rv < 0) {
+			CONNECTION_LOG(CONNECTION_ERROR, "Failed to get system info for tethering bluetooth feature");
+			return CONNECTION_ERROR_OPERATION_FAILED;
+		}
+
+		CONNECTION_LOG(CONNECTION_INFO, "[Feature state] telephony : %d, wifi : %d, tethering bluetooth : %d",
+			enable_feature.telephony, enable_feature.wifi, enable_feature.tethering_bluetooth);
+		is_check_enable_feature = true;
+	}
+
+	return CONNECTION_ERROR_NONE;
 }

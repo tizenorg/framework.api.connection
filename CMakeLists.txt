@@ -9,8 +9,18 @@ SET(PREFIX ${CMAKE_INSTALL_PREFIX})
 SET(INC_DIR include)
 INCLUDE_DIRECTORIES(${INC_DIR})
 
-SET(dependents "dlog vconf capi-base-common glib-2.0 network")
+SET(dependents "dlog vconf capi-base-common glib-2.0 network capi-system-info")
 SET(pc_dependents "capi-base-common")
+
+IF(TIZEN_DUALSIM_ENABLE)
+    ADD_DEFINITIONS(-DTIZEN_DUALSIM_ENABLE)
+ENDIF(TIZEN_DUALSIM_ENABLE)
+IF(TIZEN_WEARABLE)
+    ADD_DEFINITIONS(-DTIZEN_WEARABLE)
+ENDIF(TIZEN_WEARABLE)
+IF(TIZEN_MOBILE)
+    ADD_DEFINITIONS(-DTIZEN_MOBILE)
+ENDIF(TIZEN_MOBILE)
 
 INCLUDE(FindPkgConfig)
 pkg_check_modules(${fw_name} REQUIRED ${dependents})
@@ -29,6 +39,7 @@ ADD_DEFINITIONS("-DPREFIX=\"${CMAKE_INSTALL_PREFIX}\"")
 ADD_DEFINITIONS("-DTIZEN_DEBUG")
 
 SET(CMAKE_EXE_LINKER_FLAGS "-Wl,--as-needed -Wl,--rpath=/usr/lib")
+
 aux_source_directory(src SOURCES)
 ADD_LIBRARY(${fw_name} SHARED ${SOURCES})
 
@@ -60,7 +71,7 @@ CONFIGURE_FILE(
 )
 INSTALL(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${fw_name}.pc DESTINATION lib/pkgconfig)
 
-#ADD_SUBDIRECTORY(test)
+ADD_SUBDIRECTORY(test)
 
 IF(UNIX)
 
