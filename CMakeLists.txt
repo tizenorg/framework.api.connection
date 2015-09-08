@@ -9,8 +9,18 @@ SET(PREFIX ${CMAKE_INSTALL_PREFIX})
 SET(INC_DIR include)
 INCLUDE_DIRECTORIES(${INC_DIR})
 
-SET(dependents "dlog vconf capi-base-common glib-2.0 network")
+SET(dependents "dlog vconf capi-base-common glib-2.0 network capi-system-info")
 SET(pc_dependents "capi-base-common")
+
+IF(TIZEN_DUALSIM_ENABLE)
+    ADD_DEFINITIONS(-DTIZEN_DUALSIM_ENABLE)
+ENDIF(TIZEN_DUALSIM_ENABLE)
+IF(TIZEN_WEARABLE)
+    ADD_DEFINITIONS(-DTIZEN_WEARABLE)
+ENDIF(TIZEN_WEARABLE)
+IF(TIZEN_MOBILE)
+    ADD_DEFINITIONS(-DTIZEN_MOBILE)
+ENDIF(TIZEN_MOBILE)
 
 INCLUDE(FindPkgConfig)
 pkg_check_modules(${fw_name} REQUIRED ${dependents})
@@ -18,7 +28,7 @@ FOREACH(flag ${${fw_name}_CFLAGS})
     SET(EXTRA_CFLAGS "${EXTRA_CFLAGS} ${flag}")
 ENDFOREACH(flag)
 
-SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${EXTRA_CFLAGS} -fPIC -Wall -Werror")
+SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${EXTRA_CFLAGS} -fPIC -Wall -Werror -fvisibility=hidden")
 SET(CMAKE_C_FLAGS_DEBUG "-O0 -g")
 
 IF("${ARCH}" STREQUAL "arm")
@@ -67,10 +77,10 @@ IF(UNIX)
 
 ADD_CUSTOM_TARGET (distclean @echo cleaning for source distribution)
 ADD_CUSTOM_COMMAND(
-        DEPENDS clean 
+        DEPENDS clean
         COMMENT "distribution clean"
         COMMAND find
-        ARGS    . 
+        ARGS    .
         -not -name config.cmake -and \(
         -name tester.c -or
         -name Testing -or
@@ -93,4 +103,3 @@ ADD_CUSTOM_COMMAND(
 )
 
 ENDIF(UNIX)
-

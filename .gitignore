@@ -48,4 +48,3 @@ debian/capi-network-connection.substvars
 debian/capi-network-connection/
 test/connection_test
 test/connection_test_regress
-
