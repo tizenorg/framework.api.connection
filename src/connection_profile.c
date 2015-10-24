@@ -411,6 +411,8 @@ EXPORT_API int connection_profile_get_network_interface_name(connection_profile_
 
 EXPORT_API int connection_profile_refresh(connection_profile_h profile)
 {
+	int rv;
+
 	CHECK_FEATURE_SUPPORTED(TELEPHONY_FEATURE, WIFI_FEATURE, TETHERING_BLUETOOTH_FEATURE, ETHERNET_FEATURE);
 
 	if (!(_connection_libnet_check_profile_validity(profile))) {
@@ -421,7 +423,7 @@ EXPORT_API int connection_profile_refresh(connection_profile_h profile)
 	net_profile_info_t profile_info_local;
 	net_profile_info_t *profile_info = profile;
 
-	int rv = net_get_profile_info(profile_info->ProfileName, &profile_info_local);
+	rv = net_get_profile_info(profile_info->ProfileName, &profile_info_local);
 	if (rv == NET_ERR_ACCESS_DENIED) {
 		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
 		return CONNECTION_ERROR_PERMISSION_DENIED;
@@ -455,8 +457,9 @@ EXPORT_API int connection_profile_get_state(connection_profile_h profile, connec
 EXPORT_API int connection_profile_get_ip_config_type(connection_profile_h profile,
 		connection_address_family_e address_family, connection_ip_config_type_e* type)
 {
-	CHECK_FEATURE_SUPPORTED(TELEPHONY_FEATURE, WIFI_FEATURE, TETHERING_BLUETOOTH_FEATURE, ETHERNET_FEATURE);
 	net_ip_config_type_t profile_type;
+
+	CHECK_FEATURE_SUPPORTED(TELEPHONY_FEATURE, WIFI_FEATURE, TETHERING_BLUETOOTH_FEATURE, ETHERNET_FEATURE);
 
 	if (!(_connection_libnet_check_profile_validity(profile)) ||
 	    (address_family != CONNECTION_ADDRESS_FAMILY_IPV4 &&
@@ -557,8 +560,9 @@ EXPORT_API int connection_profile_get_ip_address(connection_profile_h profile,
 EXPORT_API int connection_profile_get_subnet_mask(connection_profile_h profile,
 		connection_address_family_e address_family, char** subnet_mask)
 {
-	CHECK_FEATURE_SUPPORTED(TELEPHONY_FEATURE, WIFI_FEATURE, TETHERING_BLUETOOTH_FEATURE, ETHERNET_FEATURE);
 	char* prefixlen;
+
+	CHECK_FEATURE_SUPPORTED(TELEPHONY_FEATURE, WIFI_FEATURE, TETHERING_BLUETOOTH_FEATURE, ETHERNET_FEATURE);
 
 	if (!(_connection_libnet_check_profile_validity(profile)) ||
 	    (address_family != CONNECTION_ADDRESS_FAMILY_IPV4 &&
@@ -575,8 +579,11 @@ EXPORT_API int connection_profile_get_subnet_mask(connection_profile_h profile,
 
 	if (address_family == CONNECTION_ADDRESS_FAMILY_IPV6) {
 		prefixlen = g_try_malloc0(MAX_PREFIX_LENGTH);
-		snprintf(prefixlen, MAX_PREFIX_LENGTH, "%d", net_info->PrefixLen6);
-		*subnet_mask =  prefixlen;
+		if (prefixlen != NULL) {
+			snprintf(prefixlen, MAX_PREFIX_LENGTH, "%d", net_info->PrefixLen6);
+			*subnet_mask = prefixlen;
+		} else
+			*subnet_mask = NULL;
 	} else
 		*subnet_mask = __profile_convert_ip_to_string(&net_info->SubnetMask,
 				address_family);
@@ -725,8 +732,9 @@ EXPORT_API int connection_profile_get_proxy_address(connection_profile_h profile
 EXPORT_API int connection_profile_set_ip_config_type(connection_profile_h profile,
 		connection_address_family_e address_family, connection_ip_config_type_e type)
 {
-	CHECK_FEATURE_SUPPORTED(TELEPHONY_FEATURE, WIFI_FEATURE, TETHERING_BLUETOOTH_FEATURE, ETHERNET_FEATURE);
 	net_ip_config_type_t *profile_type = NULL;
+
+	CHECK_FEATURE_SUPPORTED(TELEPHONY_FEATURE, WIFI_FEATURE, TETHERING_BLUETOOTH_FEATURE, ETHERNET_FEATURE);
 
 	if (!(_connection_libnet_check_profile_validity(profile)) ||
 	    (address_family != CONNECTION_ADDRESS_FAMILY_IPV4 &&

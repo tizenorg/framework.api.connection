@@ -172,10 +172,8 @@ typedef enum{
  * @details The profile name, which you get from connection_profile_get_name(), will include the keyword you set.
  * @since_tizen @if MOBILE 2.3 @elseif WEARABLE 2.3.1 @endif
  * @privlevel public
- * @privilege %http://tizen.org/privilege/network.profile \n
- * 	      %http://tizen.org/privilege/network.get
- * @remarks You must release @a profile using connection_profile_destroy(). \n
- *	    This API needs both privileges.
+ * @privilege %http://tizen.org/privilege/network.get
+ * @remarks You must release @a profile using connection_profile_destroy().
  * @param[in] type  The type of profile\n
  *		 #CONNECTION_PROFILE_TYPE_CELLULAR and #CONNECTION_PROFILE_TYPE_WIFI are supported.
  * @param[in] keyword  The keyword included in profile name
@@ -203,7 +201,7 @@ int connection_profile_destroy(connection_profile_h profile);
 
 /**
  * @brief Clones a profile handle.
- * @since_tizen @if MOBILE 2.3 @elseif WEARABLE 2.3.1 @endif
+ * @since_tizen 2.3
  * @remarks You must release @a cloned_profile using connection_profile_destroy().
  * @param[out] cloned_profile  The handle of the cloned profile
  * @param[in] origin_profile  The handle of the origin profile
@@ -476,7 +474,7 @@ int connection_profile_set_gateway_address(connection_profile_h profile, connect
  * @since_tizen @if MOBILE 2.3 @elseif WEARABLE 2.3.1 @endif
  * @remarks The allowance of the DNS address is @c 2.
  * @param[in] profile  The profile handle
- * @param[in] order  The order of the DNS address. \n 
+ * @param[in] order  The order of the DNS address. \n
  *		It starts from @c 1, which means first DNS address.
  * @param[in] address_family  The address family
  * @param[in] dns_address  The DNS address; if you set this value to NULL, then the existing value will be deleted

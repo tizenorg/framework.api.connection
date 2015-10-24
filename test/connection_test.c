@@ -48,9 +48,7 @@ static bool test_get_user_string(const char *msg, char *buf, int buf_size)
 		return false;
 	}
 
-	if (rv >= 0)
-		buf[rv] = '\0';
-
+	buf[rv-1]='\0';
 	return true;
 }
 
@@ -191,6 +189,15 @@ static void test_connection_set_default_callback(connection_error_e result, void
 		printf("Default profile setting Failed, err : [%s]\n", test_print_error(result));
 }
 
+void test_get_ethernet_cable_state_callback(connection_ethernet_cable_state_e state,
+								void* user_data)
+{
+	if(state == CONNECTION_ETHERNET_CABLE_ATTACHED)
+		printf("Ethernet Cable Connected\n");
+	else if(state == CONNECTION_ETHERNET_CABLE_DETACHED)
+		printf("Ethernet Cable Disconnected\n");
+}
+
 static bool test_get_user_selected_profile(connection_profile_h *profile, bool select)
 {
 	int rv = 0;
@@ -244,8 +251,13 @@ static bool test_get_user_selected_profile(connection_profile_h *profile, bool s
 			profile_list[profile_count] = profile_h;
 			profile_count++;
 		} else {
-			printf("%d. state:[%s], profile name : %s\n",
-				profile_count, test_print_state(profile_state), profile_name);
+			connection_cellular_service_type_e service_type;
+			if (connection_profile_get_cellular_service_type(profile_h, &service_type) != CONNECTION_ERROR_NONE) {
+				printf("Fail to get cellular service type!\n");
+			}
+
+			printf("%d. state:[%s], profile name:%s[%d]\n",
+				profile_count, test_print_state(profile_state), profile_name, service_type);
 
 			profile_list[profile_count] = profile_h;
 			profile_count++;
@@ -721,6 +733,8 @@ int test_register_client(void)
 		connection_set_type_changed_cb(connection, test_type_changed_callback, NULL);
 		connection_set_ip_address_changed_cb(connection, test_ip_changed_callback, NULL);
 		connection_set_proxy_address_changed_cb(connection, test_proxy_changed_callback, NULL);
+		connection_set_ethernet_cable_state_chaged_cb(connection,
+					test_get_ethernet_cable_state_callback, NULL);
 	} else {
 		printf("Client registration failed [%s]\n", test_print_error(err));
 		return -1;
@@ -1053,7 +1067,7 @@ int test_get_default_cellular_service_type(void)
 	char *profile_name = NULL;
 
 	rv = test_get_user_int("Input profile type to get"
-			"(1:Internet, 2:MMS, 3:Prepaid internet, 4:Prepaid MMS, 5:Tethering):", &input);
+			"(1:Internet, 2:MMS, 3:Prepaid internet, 4:Prepaid MMS, 5:Tethering, 6:Application):", &input);
 
 	if (rv == false) {
 		printf("Invalid input!!\n");
@@ -1075,6 +1089,9 @@ int test_get_default_cellular_service_type(void)
 		break;
 	case 5:
 		service_type = CONNECTION_CELLULAR_SERVICE_TYPE_TETHERING;
+		break;
+	case 6:
+		service_type =  CONNECTION_CELLULAR_SERVICE_TYPE_APPLICATION;
 		break;
 	default:
 		printf("Wrong number!!\n");
@@ -1600,6 +1617,57 @@ int test_get_profile_id(void)
 	return 1;
 }
 
+int test_get_mac_address(void)
+{
+	int rv = 0, type = 0;
+	connection_type_e conn_type;
+	char *mac_addr = NULL;
+
+	test_get_user_int("Input connection type (1:wifi, 2:ethernet)", &type);
+
+	switch (type) {
+	case 1:
+		conn_type = CONNECTION_TYPE_WIFI;
+		break;
+	case 2:
+		conn_type = CONNECTION_TYPE_ETHERNET;
+		break;
+	default:
+		printf("Wrong number!!\n");
+		return -1;
+	}
+
+	rv = connection_get_mac_address(connection, conn_type, &mac_addr);
+
+	if (rv != CONNECTION_ERROR_NONE) {
+		printf("Fail to get MAC address [%s]\n", test_print_error(rv));
+		return -1;
+	}
+
+	printf("mac address is %s\n", mac_addr);
+
+	g_free(mac_addr);
+
+	return 1;
+}
+
+int test_get_ethernet_cable_state(void)
+{
+	int rv = 0;
+	connection_ethernet_cable_state_e cable_state;
+
+	rv = connection_get_ethernet_cable_state(connection, &cable_state);
+
+	if (rv != CONNECTION_ERROR_NONE) {
+		printf("Fail to get ethernet cable state [%s]\n", test_print_error(rv));
+		return -1;
+	}
+
+	printf("Retval = [%s], Ethernet cable state [%d]\n", test_print_error(rv), cable_state);
+
+	return 1;
+}
+
 int test_reset_profile(void)
 {
 	int type, sim_id, rv;
@@ -1691,6 +1759,8 @@ gboolean test_thread(GIOChannel *source, GIOCondition condition, gpointer data)
 		printf("t 	- Get profile id\n");
 		printf("u 	- Reset profile\n");
 		printf("v 	- Get all cellular default profiles\n");
+		printf("w 	- Get mac address\n");
+		printf("x 	- Get ethernet cable state\n");
 		printf("B	- Add IPv6 new route\n");
 		printf("C	- Remove IPv6 route\n");
 		printf("0	- Exit \n");
@@ -1790,6 +1860,12 @@ gboolean test_thread(GIOChannel *source, GIOCondition condition, gpointer data)
 		break;
 	case 'v':
 		rv = test_get_default_profile_list();
+		break;
+	case 'w':
+		rv = test_get_mac_address();
+		break;
+	case 'x':
+		rv = test_get_ethernet_cable_state();
 		break;
 	case 'B':
 		rv = test_add_route_ipv6();

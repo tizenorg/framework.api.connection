@@ -83,15 +83,14 @@ typedef enum
 } connection_wifi_state_e;
 
 /**
- * @internal
  * @brief Enumeration for ethernet state.
- * @since_tizen @if MOBILE 2.3 @elseif WEARABLE 2.3.1 @endif
+ * @since_tizen 2.4
  */
 typedef enum
 {
-    CONNECTION_ETHERNET_STATE_DEACTIVATED = 0,  /**< @internal There is no Ethernet profile to open */
-    CONNECTION_ETHERNET_STATE_DISCONNECTED = 1,  /**< @internal Disconnected */
-    CONNECTION_ETHERNET_STATE_CONNECTED = 2,  /**< @internal Connected */
+    CONNECTION_ETHERNET_STATE_DEACTIVATED = 0,  /**< There is no Ethernet profile to open */
+    CONNECTION_ETHERNET_STATE_DISCONNECTED = 1,  /**< Disconnected */
+    CONNECTION_ETHERNET_STATE_CONNECTED = 2,  /**< Connected */
 } connection_ethernet_state_e;
 
 /**
@@ -125,6 +124,16 @@ typedef enum
     CONNECTION_RESET_DEFAULT_PROFILE = 0,  /**< Initialized with the default profile defined by csc */
     CONNECTION_RESET_CLEAR_PROFILE = 1,  /**< Remove all profiles */
 } connection_reset_option_e;
+
+/**
+ * @brief This enumeration defines the attached or detached state of ethernet cable.
+ * @since_tizen 2.4
+ */
+typedef enum
+{
+    CONNECTION_ETHERNET_CABLE_DETACHED = 0,  /**< Ethernet cable is detached */
+    CONNECTION_ETHERNET_CABLE_ATTACHED = 1,  /**< Ethernet cable is attached */
+} connection_ethernet_cable_state_e;
 
 /**
  * @brief Enumeration for connection errors.
@@ -283,6 +292,23 @@ int connection_get_ip_address(connection_h connection, connection_address_family
 int connection_get_proxy(connection_h connection, connection_address_family_e address_family, char** proxy);
 
 /**
+ * @brief Gets the MAC address of the Wi-Fi or ethernet.
+ * @since_tizen 2.4
+ * @remarks @a mac_addr must be released with free() by you.
+ * @param[in] connection  The handle of the connection
+ * @param[in] type  The type of current network connection
+ * @param[out] mac_addr  The MAC address
+ * @return 0 on success, otherwise negative error value.
+ * @retval #CONNECTION_ERROR_NONE  Successful
+ * @retval #CONNECTION_ERROR_INVALID_PARAMETER   Invalid parameter
+ * @retval #CONNECTION_ERROR_INVALID_OPERATION   Invalid operation
+ * @retval #CONNECTION_ERROR_OPERATION_FAILED  Operation failed
+ * @retval #CONNECTION_ERROR_NOT_SUPPORTED  Not supported
+ * @retval #CONNECTION_ERROR_OUT_OF_MEMORY  Out of memory
+ */
+int connection_get_mac_address(connection_h connection, connection_type_e type, char** mac_addr);
+
+/**
  * @brief Gets the state of cellular connection.
  * @details The returned state is for the cellular connection state.
  * @since_tizen @if MOBILE 2.3 @elseif WEARABLE 2.3.1 @endif
@@ -314,10 +340,9 @@ int connection_get_cellular_state(connection_h connection, connection_cellular_s
 int connection_get_wifi_state(connection_h connection, connection_wifi_state_e* state);
 
 /**
- * @internal
  * @brief Gets the state of the Ethernet.
  * @details The returned state is for the Ethernet connection state.
- * @since_tizen @if MOBILE 2.3 @elseif WEARABLE 2.3.1 @endif
+ * @since_tizen 2.4
  * @privlevel public
  * @privilege %http://tizen.org/privilege/network.get
  * @param[in] connection  The connection handle
@@ -330,6 +355,58 @@ int connection_get_wifi_state(connection_h connection, connection_wifi_state_e* 
  * @retval #CONNECTION_ERROR_NOT_SUPPORTED	Not supported
  */
 int connection_get_ethernet_state(connection_h connection, connection_ethernet_state_e* state);
+
+/**
+* @brief Checks for ethernet cable is attached or not.
+* @details The returned state is for the ethernet cable state.
+* @since_tizen 2.4
+* @privlevel public
+* @privilege %http://tizen.org/privilege/network.get
+* @param[in] connection  The handle of the connection
+* @param[in] state - Enum connection_ethernet_cable_state_e
+* @return 0 on success, otherwise negative error value
+* @retval #CONNECTION_ERROR_NONE  Successful
+* @retval #CONNECTION_ERROR_INVALID_PARAMETER  Invalid parameter
+* @retval #CONNECTION_ERROR_OPERATION_FAILED Operation failed
+* @retval #CONNECTION_ERROR_NOT_SUPPORTED  Not supported
+* @retval #CONNECTION_ERROR_PERMISSION_DENIED Permission Denied
+*/
+int connection_get_ethernet_cable_state(connection_h connection, connection_ethernet_cable_state_e *state);
+
+/**
+ * @brief Called when ethernet cable is plugged [in/out].
+ * @since_tizen 2.4
+ * @param[in] state The ethernet cable state (connection_ethernet_cable_state_e)
+ * @param[in] user_data The user data passed to callback registration function
+ */
+typedef void(*connection_ethernet_cable_state_chaged_cb)(
+			connection_ethernet_cable_state_e state, void* user_data);
+
+/**
+ * @brief Registers callback for ethernet cable is plugged [in/out] event.
+ * @since_tizen 2.4
+ * @param[in] callback  The callback function to be called
+ * @param[in] user_data The user data passed to the callback function
+ * @return 0 on success, otherwise negative error value
+ * @retval #CONNECTION_ERROR_NONE   Successful
+ * @retval #CONNECTION_ERROR_INVALID_PARAMETER   Invalid parameter
+ * @retval #CONNECTION_ERROR_OPERATION_FAILED   Operation failed
+ * @retval #CONNECTION_ERROR_NOT_SUPPORTED  Not supported
+ */
+int connection_set_ethernet_cable_state_chaged_cb( connection_h connection,
+		connection_ethernet_cable_state_chaged_cb callback, void *user_data);
+
+/**
+ * @brief Unregisters callback for ethernet cable is plugged [in/out] event.
+ * @since_tizen 2.4
+ * @param[in] connection  The handle of connection
+ * @return 0 on success, otherwise negative error value
+ * @retval #CONNECTION_ERROR_NONE  Successful
+ * @retval #CONNECTION_ERROR_INVALID_PARAMETER   Invalid parameter
+ * @retval #CONNECTION_ERROR_OPERATION_FAILED  Operation failed
+ * @retval #CONNECTION_ERROR_NOT_SUPPORTED  Not supported
+ */
+int connection_unset_ethernet_cable_state_chaged_cb(connection_h connection);
 
 /**
  * @brief Gets the state of the Bluetooth.
@@ -424,10 +501,8 @@ int connection_unset_proxy_address_changed_cb(connection_h connection);
  * @brief Adds a new profile which is created by connection_profile_create().
  * @since_tizen @if MOBILE 2.3 @elseif WEARABLE 2.3.1 @endif
  * @privlevel public
- * @privilege %http://tizen.org/privilege/network.profile \n
- * 	      %http://tizen.org/privilege/network.get
- * @remarks You can only add a profile of the cellular type. \n
- *	    This API needs both privileges.
+ * @privilege %http://tizen.org/privilege/network.profile
+ * @remarks You can only add a profile of the cellular type.
  * @param[in] connection  The connection handle
  * @param[in] profile  The profile handle
  * @return @c 0 on success, otherwise a negative error value
@@ -667,9 +742,7 @@ int connection_open_profile(connection_h connection, connection_profile_h profil
  * @brief Closes a connection of profile.
  * @since_tizen @if MOBILE 2.3 @elseif WEARABLE 2.3.1 @endif
  * @privlevel public
- * @privilege %http://tizen.org/privilege/network.set \n
- *	      %http://tizen.org/privilege/network.get
- * @remarks This API needs both privileges.
+ * @privilege %http://tizen.org/privilege/network.set
  * @param[in] connection  The connection handle
  * @param[in] profile  The profile handle
  * @param[in] callback  The callback function to be called
@@ -715,9 +788,7 @@ int connection_reset_profile(connection_h connection, connection_reset_option_e 
  * @details You can get the @a interface_name from connection_profile_get_network_interface_name() of opened profile.
  * @since_tizen @if MOBILE 2.3 @elseif WEARABLE 2.3.1 @endif
  * @privlevel public
- * @privilege %http://tizen.org/privilege/network.set \n
- *	      %http://tizen.org/privilege/network.get
- * @remarks This API needs both privileges.
+ * @privilege %http://tizen.org/privilege/network.set
  * @param[in] connection  The connection handle
  * @param[in] interface_name  The name of network interface
  * @param[in] host_address  The IP address of the host
@@ -736,9 +807,7 @@ int connection_add_route(connection_h connection, const char* interface_name, co
  * @details You can get the @a interface_name from connection_profile_get_network_interface_name() of opened profile.
  * @since_tizen @if MOBILE 2.3 @elseif WEARABLE 2.3.1 @endif
  * @privlevel public
- * @privilege %http://tizen.org/privilege/network.set \n
- *	      %http://tizen.org/privilege/network.get
- * @remarks This API needs both privileges.
+ * @privilege %http://tizen.org/privilege/network.set
  * @param[in] connection  The connection handle
  * @param[in] interface_name  The name of network interface
  * @param[in] host_address  The IP address of the host
@@ -820,8 +889,7 @@ int connection_get_statistics(connection_h connection, connection_type_e connect
  * @brief Resets the statistics information.
  * @since_tizen @if MOBILE 2.3 @elseif WEARABLE 2.3.1 @endif
  * @privlevel public
- * @privilege %http://tizen.org/privilege/network.set \n
- *	      %http://tizen.org/privilege/network.get
+ * @privilege %http://tizen.org/privilege/network.set
  * @remarks This API needs both privileges.
  * @param[in] connection  The connection handle
  * @param[in] connection_type  The type of connection (only CONNECTION_TYPE_WIFI and CONNECTION_TYPE_CELLULAR are supported)

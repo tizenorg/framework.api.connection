@@ -21,15 +21,6 @@
 
 #include "net_connection_private.h"
 
-typedef struct _connection_handle_s {
-	connection_type_changed_cb type_changed_callback;
-	connection_address_changed_cb ip_changed_callback;
-	connection_address_changed_cb proxy_changed_callback;
-	void *type_changed_user_data;
-	void *ip_changed_user_data;
-	void *proxy_changed_user_data;
-} connection_handle_s;
-
 static __thread GSList *conn_handle_list = NULL;
 
 static int __connection_convert_net_state(int status)
@@ -127,6 +118,33 @@ static void __connection_cb_type_change_cb(keynode_t *node, void *user_data)
 		handle = (connection_h)list->data;
 		_connection_callback_add(__connection_cb_type_changed_cb_idle, (gpointer)handle);
 	}
+}
+
+static void __connection_cb_ethernet_cable_state_changed_cb(connection_ethernet_cable_state_e state)
+{
+	CONNECTION_LOG(CONNECTION_INFO, "Ethernet Cable state Indication");
+
+	GSList *list;
+
+	for (list = conn_handle_list; list; list = list->next) {
+		connection_handle_s *local_handle = (connection_handle_s *)list->data;
+		if (local_handle->ethernet_cable_state_changed_callback)
+			local_handle->ethernet_cable_state_changed_callback(state,
+					local_handle->ethernet_cable_state_changed_user_data);
+	}
+}
+
+static int __connection_get_ethernet_cable_state_changed_callback_count(void)
+{
+	GSList *list;
+	int count = 0;
+
+	for (list = conn_handle_list; list; list = list->next) {
+		connection_handle_s *local_handle = (connection_handle_s *)list->data;
+		if (local_handle->ethernet_cable_state_changed_callback) count++;
+	}
+
+	return count;
 }
 
 static int __connection_set_type_changed_callback(connection_h connection,
@@ -340,6 +358,26 @@ static int __connection_set_proxy_changed_callback(connection_h connection,
 	return CONNECTION_ERROR_NONE;
 }
 
+static int __connection_set_ethernet_cable_state_changed_cb(connection_h connection,
+		connection_ethernet_cable_state_chaged_cb callback, void *user_data)
+{
+	connection_handle_s *local_handle = (connection_handle_s *)connection;
+
+	if (callback) {
+		if (__connection_get_ethernet_cable_state_changed_callback_count() == 0)
+			_connection_libnet_set_ethernet_cable_state_changed_cb(
+					__connection_cb_ethernet_cable_state_changed_cb);
+
+	} else {
+		if (__connection_get_ethernet_cable_state_changed_callback_count() == 1)
+			_connection_libnet_set_ethernet_cable_state_changed_cb(NULL);
+	}
+
+	local_handle->ethernet_cable_state_changed_callback = callback;
+	local_handle->ethernet_cable_state_changed_user_data = user_data;
+	return CONNECTION_ERROR_NONE;
+}
+
 static int __connection_get_handle_count(void)
 {
 	return ((int)g_slist_length(conn_handle_list));
@@ -390,6 +428,7 @@ EXPORT_API int connection_destroy(connection_h connection)
 	__connection_set_type_changed_callback(connection, NULL, NULL);
 	__connection_set_ip_changed_callback(connection, NULL, NULL);
 	__connection_set_proxy_changed_callback(connection, NULL, NULL);
+	__connection_set_ethernet_cable_state_changed_cb(connection, NULL, NULL);
 
 	conn_handle_list = g_slist_remove(conn_handle_list, connection);
 
@@ -406,6 +445,9 @@ EXPORT_API int connection_destroy(connection_h connection)
 
 EXPORT_API int connection_get_type(connection_h connection, connection_type_e* type)
 {
+	int rv = 0;
+	int status = 0;
+
 	CHECK_FEATURE_SUPPORTED(TELEPHONY_FEATURE, WIFI_FEATURE, TETHERING_BLUETOOTH_FEATURE, ETHERNET_FEATURE);
 
 	if (type == NULL || !(__connection_check_handle_validity(connection))) {
@@ -413,8 +455,8 @@ EXPORT_API int connection_get_type(connection_h connection, connection_type_e* t
 		return CONNECTION_ERROR_INVALID_PARAMETER;
 	}
 
-	int status = 0;
-	if (vconf_get_int(VCONFKEY_NETWORK_STATUS, &status)) {
+	rv = vconf_get_int(VCONFKEY_NETWORK_STATUS, &status);
+	if (rv != VCONF_OK) {
 		CONNECTION_LOG(CONNECTION_ERROR, "vconf_get_int Failed = %d", status);
 		return CONNECTION_ERROR_OPERATION_FAILED;
 	}
@@ -478,6 +520,100 @@ EXPORT_API int connection_get_proxy(connection_h connection,
 		CONNECTION_LOG(CONNECTION_ERROR, "vconf_get_str Failed");
 		return CONNECTION_ERROR_OPERATION_FAILED;
 	}
+
+	return CONNECTION_ERROR_NONE;
+}
+
+EXPORT_API int connection_get_mac_address(connection_h connection, connection_type_e type, char** mac_addr)
+{
+	FILE *fp;
+	char buf[CONNECTION_MAC_INFO_LENGTH + 1];
+
+	CHECK_FEATURE_SUPPORTED(WIFI_FEATURE, ETHERNET_FEATURE);
+
+	if(type == CONNECTION_TYPE_WIFI)
+		CHECK_FEATURE_SUPPORTED(WIFI_FEATURE);
+	else if(type == CONNECTION_TYPE_ETHERNET)
+		CHECK_FEATURE_SUPPORTED(ETHERNET_FEATURE);
+
+	if (mac_addr == NULL || !(__connection_check_handle_validity(connection))) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
+		return CONNECTION_ERROR_INVALID_PARAMETER;
+	}
+
+	switch (type) {
+	case CONNECTION_TYPE_WIFI:
+#if defined TIZEN_TV
+		fp = fopen(WIFI_MAC_INFO_FILE, "r");
+		if (fp == NULL) {
+			CONNECTION_LOG(CONNECTION_ERROR, "Failed to open file %s", WIFI_MAC_INFO_FILE);
+			return CONNECTION_ERROR_OUT_OF_MEMORY;
+		}
+
+		if (fgets(buf, sizeof(buf), fp) == NULL) {
+			CONNECTION_LOG(CONNECTION_ERROR, "Failed to get MAC info from %s", WIFI_MAC_INFO_FILE);
+			fclose(fp);
+			return CONNECTION_ERROR_OPERATION_FAILED;
+		}
+
+		CONNECTION_LOG(CONNECTION_INFO, "%s : %s", WIFI_MAC_INFO_FILE, buf);
+
+		*mac_addr = (char *)malloc(CONNECTION_MAC_INFO_LENGTH + 1);
+		if (*mac_addr == NULL) {
+			CONNECTION_LOG(CONNECTION_ERROR, "malloc() failed");
+			fclose(fp);
+			return CONNECTION_ERROR_OUT_OF_MEMORY;
+		}
+		g_strlcpy(*mac_addr, buf, CONNECTION_MAC_INFO_LENGTH + 1);
+		fclose(fp);
+#else
+		*mac_addr = vconf_get_str(VCONFKEY_WIFI_BSSID_ADDRESS);
+
+		if(*mac_addr == NULL) {
+			CONNECTION_LOG(CONNECTION_ERROR, "Failed to get vconf from %s", VCONFKEY_WIFI_BSSID_ADDRESS);
+			return CONNECTION_ERROR_OPERATION_FAILED;
+		}
+#endif
+		break;
+	case CONNECTION_TYPE_ETHERNET:
+		fp = fopen(ETHERNET_MAC_INFO_FILE, "r");
+		if (fp == NULL) {
+			CONNECTION_LOG(CONNECTION_ERROR, "Failed to open file %s", ETHERNET_MAC_INFO_FILE);
+			return CONNECTION_ERROR_OUT_OF_MEMORY;
+		}
+
+		if (fgets(buf, sizeof(buf), fp) == NULL) {
+			CONNECTION_LOG(CONNECTION_ERROR, "Failed to get MAC info from %s", ETHERNET_MAC_INFO_FILE);
+			fclose(fp);
+			return CONNECTION_ERROR_OPERATION_FAILED;
+		}
+
+		CONNECTION_LOG(CONNECTION_INFO, "%s : %s", ETHERNET_MAC_INFO_FILE, buf);
+
+		*mac_addr = (char *)malloc(CONNECTION_MAC_INFO_LENGTH + 1);
+		if (*mac_addr == NULL) {
+			CONNECTION_LOG(CONNECTION_ERROR, "malloc() failed");
+			fclose(fp);
+			return CONNECTION_ERROR_OUT_OF_MEMORY;
+		}
+
+		g_strlcpy(*mac_addr, buf,CONNECTION_MAC_INFO_LENGTH + 1);
+		fclose(fp);
+
+		break;
+	default:
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
+		return CONNECTION_ERROR_INVALID_PARAMETER;
+	}
+
+	/* Checking Invalid MAC Address */
+	if((strcmp(*mac_addr, "00:00:00:00:00:00") == 0) ||
+			(strcmp(*mac_addr, "ff:ff:ff:ff:ff:ff") == 0)) {
+		CONNECTION_LOG(CONNECTION_ERROR, "MAC Address(%s) is invalid", *mac_addr);
+		return CONNECTION_ERROR_INVALID_OPERATION;
+	}
+
+	CONNECTION_LOG(CONNECTION_INFO, "MAC Address %s", *mac_addr);
 
 	return CONNECTION_ERROR_NONE;
 }
@@ -578,6 +714,45 @@ EXPORT_API int connection_get_ethernet_state(connection_h connection, connection
 	}
 
 	return _connection_libnet_get_ethernet_state(state);
+}
+
+EXPORT_API int connection_get_ethernet_cable_state(connection_h connection, connection_ethernet_cable_state_e *state)
+{
+	CHECK_FEATURE_SUPPORTED(ETHERNET_FEATURE);
+
+	if (state == NULL || !(__connection_check_handle_validity(connection))) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
+		return CONNECTION_ERROR_INVALID_PARAMETER;
+	}
+
+	return _connection_libnet_get_ethernet_cable_state(state);
+}
+
+EXPORT_API int connection_set_ethernet_cable_state_chaged_cb(connection_h connection,
+			  connection_ethernet_cable_state_chaged_cb callback, void *user_data)
+{
+	CHECK_FEATURE_SUPPORTED(ETHERNET_FEATURE);
+
+	if (callback == NULL || !(__connection_check_handle_validity(connection))) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
+		return CONNECTION_ERROR_INVALID_PARAMETER;
+	}
+
+	return __connection_set_ethernet_cable_state_changed_cb(connection,
+							callback, user_data);
+}
+
+EXPORT_API int connection_unset_ethernet_cable_state_chaged_cb(connection_h connection)
+{
+	CHECK_FEATURE_SUPPORTED(ETHERNET_FEATURE);
+
+	if ( !(__connection_check_handle_validity(connection)) ) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Invalid parameter");
+		return CONNECTION_ERROR_INVALID_PARAMETER;
+	}
+
+	return __connection_set_ethernet_cable_state_changed_cb(connection,
+							NULL, NULL);
 }
 
 EXPORT_API int connection_get_bt_state(connection_h connection, connection_bt_state_e* state)
@@ -740,7 +915,7 @@ EXPORT_API int connection_update_profile(connection_h connection, connection_pro
 	int rv = 0;
 	net_profile_info_t *profile_info = profile;
 
-	CHECK_FEATURE_SUPPORTED(TELEPHONY_FEATURE, WIFI_FEATURE);
+	CHECK_FEATURE_SUPPORTED(TELEPHONY_FEATURE, WIFI_FEATURE, ETHERNET_FEATURE);
 
 	if (!(__connection_check_handle_validity(connection)) ||
 	    !(_connection_libnet_check_profile_validity(profile))) {
@@ -780,18 +955,21 @@ EXPORT_API int connection_profile_iterator_next(connection_profile_iterator_h pr
 							connection_profile_h* profile)
 {
 	CHECK_FEATURE_SUPPORTED(TELEPHONY_FEATURE, WIFI_FEATURE, TETHERING_BLUETOOTH_FEATURE, ETHERNET_FEATURE);
+
 	return _connection_libnet_get_iterator_next(profile_iterator, profile);
 }
 
 EXPORT_API bool connection_profile_iterator_has_next(connection_profile_iterator_h profile_iterator)
 {
 	CHECK_FEATURE_SUPPORTED(TELEPHONY_FEATURE, WIFI_FEATURE, TETHERING_BLUETOOTH_FEATURE, ETHERNET_FEATURE);
+
 	return _connection_libnet_iterator_has_next(profile_iterator);
 }
 
 EXPORT_API int connection_destroy_profile_iterator(connection_profile_iterator_h profile_iterator)
 {
 	CHECK_FEATURE_SUPPORTED(TELEPHONY_FEATURE, WIFI_FEATURE, TETHERING_BLUETOOTH_FEATURE, ETHERNET_FEATURE);
+
 	return _connection_libnet_destroy_iterator(profile_iterator);
 }
 
@@ -923,7 +1101,7 @@ EXPORT_API int connection_remove_route(connection_h connection, const char* inte
 
 EXPORT_API int connection_add_route_ipv6(connection_h connection, const char *interface_name, const char *host_address, const char * gateway)
 {
-	CHECK_FEATURE_SUPPORTED(TELEPHONY_FEATURE, WIFI_FEATURE);
+	CHECK_FEATURE_SUPPORTED(TELEPHONY_FEATURE, WIFI_FEATURE, ETHERNET_FEATURE);
 
 	if (!(__connection_check_handle_validity(connection)) ||
 	    interface_name == NULL || host_address == NULL) {
@@ -936,7 +1114,7 @@ EXPORT_API int connection_add_route_ipv6(connection_h connection, const char *in
 
 EXPORT_API int connection_remove_route_ipv6(connection_h connection, const char *interface_name, const char *host_address, const char * gateway)
 {
-	CHECK_FEATURE_SUPPORTED(TELEPHONY_FEATURE, WIFI_FEATURE);
+	CHECK_FEATURE_SUPPORTED(TELEPHONY_FEATURE, WIFI_FEATURE, ETHERNET_FEATURE);
 
 	if (!(__connection_check_handle_validity(connection)) ||
 	    interface_name == NULL || host_address == NULL) {

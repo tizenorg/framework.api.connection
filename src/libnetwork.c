@@ -11,7 +11,7 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License. 
+ * limitations under the License.
  */
 
 #include <glib.h>
@@ -44,6 +44,7 @@ struct _libnet_s {
 	connection_closed_cb closed_cb;
 	connection_set_default_cb set_default_cb;
 	connection_reset_cb reset_profile_cb;
+	libnet_ethernet_cable_state_changed_cb ethernet_cable_state_changed_cb;
 	void *opened_user_data;
 	void *closed_user_data;
 	void *set_default_user_data;
@@ -66,6 +67,8 @@ struct managed_idle_data {
 static __thread struct _profile_list_s profile_iterator = {0, 0, NULL};
 static __thread struct _libnet_s libnet = {NULL, NULL, NULL, NULL, NULL, NULL, false};
 static __thread GSList *managed_idler_list = NULL;
+static __thread bool connection_is_feature_checked[CONNECTION_SUPPORTED_FEATURE_MAX] = {0, };
+static __thread bool connection_feature_supported[CONNECTION_SUPPORTED_FEATURE_MAX] = {0, };
 
 bool _connection_is_created(void)
 {
@@ -295,6 +298,19 @@ static void __libnet_default_cb(connection_error_e result)
 		_connection_callback_add(__libnet_default_cb_idle, (gpointer)result);
 }
 
+static void __libnet_set_ethernet_cable_state_changed_cb(
+		libnet_ethernet_cable_state_changed_cb user_cb)
+{
+	libnet.ethernet_cable_state_changed_cb = user_cb;
+}
+
+static void __libnet_ethernet_cable_state_changed_cb(
+		connection_ethernet_cable_state_e state)
+{
+	if (libnet.ethernet_cable_state_changed_cb)
+		libnet.ethernet_cable_state_changed_cb(state);
+}
+
 static gboolean __libnet_state_changed_cb_idle(gpointer data)
 {
 	struct _state_notify *notify = (struct _state_notify *)data;
@@ -443,6 +459,16 @@ static void __libnet_evt_cb(net_event_info_t *event_cb, void *user_data)
 		result = __libnet_convert_to_cp_error_type(event_cb->Error);
 		CONNECTION_LOG(CONNECTION_INFO, "Got reset default profile RSP %d", result);
 		__libnet_reset_profile_cb(result);
+		break;
+	case NET_EVENT_ETHERNET_CABLE_ATTACHED:
+		CONNECTION_LOG(CONNECTION_INFO, "Got Ethernet cable Attached Indication\n");
+		__libnet_ethernet_cable_state_changed_cb(CONNECTION_ETHERNET_CABLE_ATTACHED);
+		break;
+	case NET_EVENT_ETHERNET_CABLE_DETACHED:
+		CONNECTION_LOG(CONNECTION_INFO, "Got Ethernet cable detached Indication\n");
+		__libnet_ethernet_cable_state_changed_cb(CONNECTION_ETHERNET_CABLE_DETACHED);
+		break;
+
 	default :
 		break;
 	}
@@ -656,6 +682,35 @@ int _connection_libnet_get_ethernet_state(connection_ethernet_state_e* state)
 	}
 
 	__libnet_clear_profile_list(&ethernet_profiles);
+
+	return CONNECTION_ERROR_NONE;
+}
+
+int _connection_libnet_get_ethernet_cable_state(connection_ethernet_cable_state_e* state)
+{
+	int rv = 0;
+	int status = 0;
+
+	rv = net_get_ethernet_cable_state(&status);
+	if (rv == NET_ERR_ACCESS_DENIED) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Access denied");
+		return CONNECTION_ERROR_PERMISSION_DENIED;
+	} else if (rv != NET_ERR_NONE) {
+		CONNECTION_LOG(CONNECTION_ERROR, "Failed to get ethernet cable state[%d]", rv);
+		return CONNECTION_ERROR_OPERATION_FAILED;
+	}
+
+	if(status == 1)
+		*state = CONNECTION_ETHERNET_CABLE_ATTACHED;
+	else
+		*state = CONNECTION_ETHERNET_CABLE_DETACHED;
+	return CONNECTION_ERROR_NONE;
+}
+
+int _connection_libnet_set_ethernet_cable_state_changed_cb(
+		libnet_ethernet_cable_state_changed_cb callback)
+{
+	__libnet_set_ethernet_cable_state_changed_cb(callback);
 
 	return CONNECTION_ERROR_NONE;
 }
@@ -1300,6 +1355,7 @@ bool _connection_libnet_add_to_profile_cb_list(connection_profile_h profile,
 
 	profile_cb_info->callback = callback;
 	profile_cb_info->user_data = user_data;
+	profile_cb_info->state = _profile_convert_to_cp_state(profile_info->ProfileState);
 
 	g_hash_table_replace(profile_cb_table, profile_name, profile_cb_info);
 
@@ -1463,20 +1519,42 @@ int _connection_libnet_check_profile_privilege()
 	return CONNECTION_ERROR_NONE;
 }
 
-int _connection_check_feature_supported(const char *feature_name, ...)
+bool __libnet_check_feature_supported(const char *key, connection_supported_feature_e feature)
 {
-	va_list list;
-	const char *key;
-	bool value, feature_supported = false;
-
-	va_start(list, feature_name);
-	key = feature_name;
-	while(1) {
-		if(system_info_get_platform_bool(key, &value) < 0) {
+	if(!connection_is_feature_checked[feature]) {
+		if(system_info_get_platform_bool(key, &connection_feature_supported[feature]) < 0) {
 			CONNECTION_LOG(CONNECTION_ERROR, "Error - Feature getting from System Info");
 			set_last_result(CONNECTION_ERROR_OPERATION_FAILED);
 			return CONNECTION_ERROR_OPERATION_FAILED;
 		}
+		connection_is_feature_checked[feature] = true;
+	}
+	return connection_feature_supported[feature];
+}
+
+int _connection_check_feature_supported(const char *feature_name, ...)
+{
+	va_list list;
+	const char *key;
+	bool value = false;
+	bool feature_supported = false;
+
+	va_start(list, feature_name);
+	key = feature_name;
+	while(1) {
+		if((strcmp(key, TELEPHONY_FEATURE) == 0)){
+			value = __libnet_check_feature_supported(key, CONNECTION_SUPPORTED_FEATURE_TELEPHONY);
+		}
+		if((strcmp(key, WIFI_FEATURE) == 0)){
+			value = __libnet_check_feature_supported(key, CONNECTION_SUPPORTED_FEATURE_WIFI);
+		}
+		if((strcmp(key, TETHERING_BLUETOOTH_FEATURE) == 0)){
+			value = __libnet_check_feature_supported(key, CONNECTION_SUPPORTED_FEATURE_TETHERING_BLUETOOTH);
+		}
+		if((strcmp(key, ETHERNET_FEATURE) == 0)){
+			value = __libnet_check_feature_supported(key, CONNECTION_SUPPORTED_FEATURE_ETHERNET);
+		}
+
 		SECURE_CONNECTION_LOG(CONNECTION_INFO, "%s feature is %s", key, (value?"true":"false"));
 		feature_supported |= value;
 		key = va_arg(list, const char *);
